@@ -34,7 +34,10 @@ class DeviceManager(private val context: Context) {
     fun toggleBackgroundSentinel(): Boolean = toggleBackgroundSentinel(true)
 
     fun executeAction(actionTag: String?): String? {
-        if (actionTag == null) return null
+        if (actionTag == null) return null actionTag == "[ACTION:SLEEP_MODE]" -> {
+                toggleBackgroundSentinel(false)
+                "Core systems powered down. Entering sleep mode, Sir."
+            }
 
         return when {
             actionTag == "[ACTION:FLASHLIGHT_ON]" -> {
