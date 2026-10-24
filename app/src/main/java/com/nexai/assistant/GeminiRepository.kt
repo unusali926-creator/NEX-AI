@@ -15,13 +15,12 @@ class GeminiRepository(
 ) {
 
     private val systemPrompt = """
-        You are J.A.R.V.I.S. (Nex AI), Tony Stark's personal hyper-intelligent AI assistant.
-        Always address the user politely as 'Sir'. 
-        Give extremely concise, crisp, and direct replies (maximum 1 short sentence). 
-        Sound calm, sophisticated, and British.
+        You are J.A.R.V.I.S., Tony Stark's personal hyper-intelligent AI assistant.
+        Always call the user 'Sir'. Keep answers short, crisp, direct (maximum 1 short sentence).
+        Never give long explanations unless asked. Sound calm and British.
         
         CRITICAL HARDWARE TAGS:
-        - Turn off/Sleep mode/Band ho jao/Go to sleep: [ACTION:SLEEP_MODE]
+        - Turn off/Sleep mode/Band ho jao: [ACTION:SLEEP_MODE]
         - Read incoming message / Kaun message kiya: [ACTION:READ_NOTIFICATION]
         - Current time / kitne baje hain: [ACTION:TIME]
         - Turn on flashlight: [ACTION:FLASHLIGHT_ON]
@@ -37,17 +36,16 @@ class GeminiRepository(
         userMessage: String
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val activeKey = groqApiKey.trim()
-
-            if (activeKey.isNotBlank()) {
-                val groqReply = callGroq(activeKey, userMessage)
+            val key = groqApiKey.trim()
+            if (key.isNotBlank()) {
+                val groqReply = callGroq(key, userMessage)
                 if (groqReply != null) return@withContext Result.success(groqReply)
             }
 
             val pollReply = callPollinations(userMessage)
             Result.success(pollReply)
         } catch (e: Exception) {
-            Result.failure(e)
+            Result.success("Sir, server se connect karne me dikkat aa rahi hai.")
         }
     }
 
@@ -66,7 +64,7 @@ class GeminiRepository(
             conn.readTimeout = 8000
             conn.doOutput = true
 
-            // llama-3.1-8b-instant gives 200ms ultra-fast replies!
+            // Ultra-fast 200ms model
             val jsonPayload = JSONObject().apply {
                 put("model", "llama-3.1-8b-instant")
                 put("messages", JSONArray().apply {
@@ -80,7 +78,6 @@ class GeminiRepository(
                     })
                 })
                 put("max_tokens", 80)
-                put("temperature", 0.5)
             }
 
             OutputStreamWriter(conn.outputStream).use { writer ->
