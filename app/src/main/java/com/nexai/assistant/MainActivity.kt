@@ -127,7 +127,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        handleWakeUpIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("WAKE_TRIGGERED", false)) {
+            voiceManager?.speak("At your service, Sir.")
+            voiceManager?.startListening()
+        }
     }
 
     private fun handleWakeUpIntent(intent: Intent?) {
