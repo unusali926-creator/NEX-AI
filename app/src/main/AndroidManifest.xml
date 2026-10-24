@@ -19,7 +19,7 @@
 
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
 
-    <!-- Queries for launching external apps safely -->
+    <!-- App launch queries -->
     <queries>
         <intent>
             <action android:name="android.speech.RecognitionService" />
@@ -61,16 +61,6 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="microphone" />
-
-        <!-- Screen Touch / Tap Engine (Android Accessibility Service) -->
-        <service
-            android:name=".NexAccessibilityService"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-        </service>
 
     </application>
 </manifest>
