@@ -2,109 +2,117 @@ package com.nexai.assistant
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.URL
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
 import java.net.URLEncoder
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.util.concurrent.TimeUnit
 
-class GeminiRepository(private val prefs: PreferencesManager) {
+data class NexResponse(
+    val replyText: String,
+    val actionTag: String? = null
+)
 
-    // Sub-Second Instant Local Brain (No Server Delay)
-    private fun handleInstantJarvisResponse(query: String): String? {
-        val q = query.lowercase().trim()
+class GeminiRepository(private val groqApiKey: String = "") {
 
-        // 1. Live Notification Scanner
-        if (q.contains("message") || q.contains("kiska message") || q.contains("kaun message") || q.contains("notification")) {
-            return NexNotificationListenerService.getRecentMessagesSummary()
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .build()
+
+    private val systemPrompt = """
+        You are Nex AI, an advanced JARVIS-class AI assistant created for Tony Stark standards.
+        Always address the user politely as 'Sir'. Keep responses concise (1-2 sentences), sharp, witty.
+        Languages: English, Hindi, Hinglish, Urdu, Bengali, Punjabi.
+        
+        CRITICAL HARDWARE ACTIONS:
+        If user wants hardware actions, append an exact tag at the very end of your response:
+        - Turn on flashlight: [ACTION:FLASHLIGHT_ON]
+        - Turn off flashlight: [ACTION:FLASHLIGHT_OFF]
+        - Check battery: [ACTION:BATTERY]
+        - Max volume: [ACTION:VOLUME_MAX]
+        - Mute volume: [ACTION:VOLUME_MUTE]
+        - Open WhatsApp: [ACTION:OPEN_WHATSAPP]
+        - Open YouTube: [ACTION:OPEN_YOUTUBE]
+        - Open Camera: [ACTION:OPEN_CAMERA]
+    """.trimIndent()
+
+    suspend fun getResponse(userMessage: String): NexResponse = withContext(Dispatchers.IO) {
+        // 1. Try Groq (Fastest) if key exists
+        if (groqApiKey.isNotBlank() && groqApiKey != "APNI_KEY_YAHAN_DALO") {
+            try {
+                val groqReply = callGroqApi(userMessage)
+                if (groqReply != null) return@withContext parseActionTag(groqReply)
+            } catch (e: Exception) {
+                // Fallback to Pollinations
+            }
         }
 
-        // 2. Hardware Direct Controls
-        if (q.contains("torch on") || q.contains("flashlight on") || q.contains("light on")) return "[ACTION:TORCH_ON]"
-        if (q.contains("torch off") || q.contains("flashlight off") || q.contains("light band") || q.contains("light off")) return "[ACTION:TORCH_OFF]"
-        if (q.contains("battery") || q.contains("charging") || q.contains("charge kitna")) return "[ACTION:BATTERY]"
-        if (q.contains("volume full") || q.contains("sound max") || q.contains("awaaz badhao")) return "[ACTION:VOLUME_MAX]"
-        if (q.contains("volume mute") || q.contains("silent") || q.contains("awaaz band")) return "[ACTION:VOLUME_MUTE]"
+        // 2. Fallback: Free Zero-Key Pollinations Engine
+        return@withContext callPollinations(userMessage)
+    }
 
-        // 3. Fast App Launcher
-        if (q.contains("whatsapp")) return "[ACTION:APP_WHATSAPP]"
-        if (q.contains("youtube") && !q.contains("play")) return "[ACTION:APP_YOUTUBE]"
-        if (q.contains("play") && q.contains("youtube")) {
-            val songQuery = q.replace("play", "").replace("on youtube", "").replace("youtube", "").trim()
-            return "[ACTION:SEARCH_YOUTUBE:$songQuery]"
-        }
-        if (q.contains("camera") || q.contains("photo")) return "[ACTION:APP_CAMERA]"
-        if (q.contains("instagram")) return "[ACTION:APP_INSTAGRAM]"
-        if (q.contains("wifi") || q.contains("wi-fi")) return "[ACTION:SETTINGS_WIFI]"
-        if (q.contains("bluetooth")) return "[ACTION:SETTINGS_BLUETOOTH]"
-        if (q.contains("call") || q.contains("dial")) return "[ACTION:DIALPAD]"
-
-        // 4. Standby & Shutdown
-        if (q.contains("sleep") || q.contains("band ho jao") || q.contains("shut down") || q.contains("deactivate")) {
-            return "[ACTION:DEACTIVATE_CORE]"
+    private fun callGroqApi(message: String): String? {
+        val url = "https://api.groq.com/openai/v1/chat/completions"
+        val jsonPayload = JSONObject().apply {
+            put("model", "llama-3.3-70b-versatile")
+            put("messages", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "system")
+                    put("content", systemPrompt)
+                })
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", message)
+                })
+            })
+            put("max_tokens", 120)
         }
 
-        // 5. Instant Time & Date Queries
-        if (q.contains("time") || q.contains("samay") || q.contains("kitne baje")) {
-            val timeStr = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
-            return "Current time is $timeStr, Sir."
-        }
-        if (q.contains("date") || q.contains("tareekh") || q.contains("din")) {
-            val dateStr = SimpleDateFormat("EEEE, d MMMM yyyy", Locale.getDefault()).format(Date())
-            return "Today is $dateStr, Sir."
-        }
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("Authorization", "Bearer $groqApiKey")
+            .addHeader("Content-Type", "application/json")
+            .post(jsonPayload.toString().toRequestBody("application/json".toMediaType()))
+            .build()
 
-        // 6. Fast Professional JARVIS Conversational Hooks
-        if (q == "hello" || q == "hi" || q == "hey" || q == "nex") {
-            return "Online and operational, Sir. Awaiting your instructions."
+        client.newCall(request).execute().use { response ->
+            if (response.isSuccessful) {
+                val body = response.body?.string() ?: return null
+                val json = JSONObject(body)
+                return json.getJSONArray("choices")
+                    .getJSONObject(0)
+                    .getJSONObject("message")
+                    .getString("content")
+            }
         }
-        if (q.contains("kaise ho") || q.contains("how are you")) {
-            return "All diagnostic parameters nominal, Sir. Fully ready for your commands."
-        }
-        if (q.contains("who are you") || q.contains("tum kaun ho") || q.contains("apna intro")) {
-            return "I am Nex AI, your personal autonomous assistant. I manage device operations, notifications, and intelligence queries."
-        }
-
         return null
     }
 
-    suspend fun getResponse(history: List<ChatMessage>, userPrompt: String): Result<String> {
-        return withContext(Dispatchers.IO) {
-            try {
-                // 1. Instant response check (0.05 seconds latency!)
-                val instant = handleInstantJarvisResponse(userPrompt)
-                if (instant != null) {
-                    return@withContext Result.success(instant)
-                }
+    private fun callPollinations(message: String): NexResponse {
+        return try {
+            val fullPrompt = "$systemPrompt\nUser: $message"
+            val encodedPrompt = URLEncoder.encode(fullPrompt, "UTF-8")
+            val url = "https://text.pollinations.ai/$encodedPrompt"
 
-                // 2. Streamlined Fast Cloud Intelligence
-                val systemPrompt = "You are Nex AI, Tony Stark's personal JARVIS. Always address the user as 'Sir'. Keep answers crisp, highly intelligent, concise, and professional. Language: ${prefs.preferredLanguage}. No robotic fluff."
-                val fullQuery = "$systemPrompt\nQuery: $userPrompt"
-                val encodedPrompt = URLEncoder.encode(fullQuery, "UTF-8")
-                val url = URL("https://text.pollinations.ai/$encodedPrompt")
-
-                val connection = (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 6000 // Fast 6s timeout to prevent hanging
-                    readTimeout = 6000
-                    setRequestProperty("User-Agent", "NexAI-JARVIS-Engine")
-                }
-
-                if (connection.responseCode == 200) {
-                    val reader = BufferedReader(InputStreamReader(connection.inputStream))
-                    val reply = reader.readText().trim()
-                    reader.close()
-                    Result.success(reply)
-                } else {
-                    Result.success("Acknowledged, Sir. Processing parameters are active. How would you like to proceed?")
-                }
-            } catch (e: Exception) {
-                // Instant Fail-Safe JARVIS Response (Never stays silent)
-                Result.success("Understood, Sir. Communication network experienced a momentary latency, but local hardware protocols are fully responsive.")
+            val request = Request.Builder().url(url).build()
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string() ?: "Online and ready, Sir."
+                parseActionTag(body)
             }
+        } catch (e: Exception) {
+            NexResponse("Sir, I am having trouble connecting to satellite feeds.", null)
         }
+    }
+
+    private fun parseActionTag(rawText: String): NexResponse {
+        val regex = "\\[ACTION:[A-Z_]+\\]".toRegex()
+        val match = regex.find(rawText)
+        val actionTag = match?.value
+        val cleanReply = rawText.replace(regex, "").trim()
+        return NexResponse(cleanReply, actionTag)
     }
 }
