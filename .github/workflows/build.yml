@@ -37,43 +37,16 @@ jobs:
 
         if [ $STATUS -eq 0 ]; then
           echo "## 🎉 BUILD SUCCESSFUL! APK TAYYAR HAI!" >> $GITHUB_STEP_SUMMARY
-          echo "Neeche Artifacts section se **NexAI-Debug-APK** download kar lo." >> $GITHUB_STEP_SUMMARY
         else
-          echo "## 🚨 NEX AI X-RAY REPORT: EXACT PROBLEM FOUND" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # 1. Kotlin Code Error Scan (File aur Line Number nikalna)
-          KOTLIN_ERR=$(grep -E "^e: " full_build.log || true)
-          if [ -n "$KOTLIN_ERR" ]; then
-            echo "### 🔴 1. KOTLIN CODE ERRORS (File Name & Line Number):" >> $GITHUB_STEP_SUMMARY
-            echo '```text' >> $GITHUB_STEP_SUMMARY
-            echo "$KOTLIN_ERR" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-          fi
-
-          # 2. XML / Resource Error Scan
-          AAPT_ERR=$(grep -i "AAPT: error:" full_build.log || true)
-          if [ -n "$AAPT_ERR" ]; then
-            echo "### 🟠 2. XML / RESOURCE ERRORS:" >> $GITHUB_STEP_SUMMARY
-            echo '```text' >> $GITHUB_STEP_SUMMARY
-            echo "$AAPT_ERR" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-          fi
-
-          # 3. Gradle 'What Went Wrong' Block
-          echo "### 🟡 3. EXACT ROOT CAUSE (Gradle Report):" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚨 NEX AI EXACT KOTLIN ERROR:" >> $GITHUB_STEP_SUMMARY
           echo '```text' >> $GITHUB_STEP_SUMMARY
-          sed -n '/\* What went wrong:/,/\* Try:/p' full_build.log | head -n 35 >> $GITHUB_STEP_SUMMARY
+          
+          # Har wo line jisme Kotlin file ka error hai (.kt:)
+          grep -C 1 "\.kt:" full_build.log | head -n 40 >> $GITHUB_STEP_SUMMARY
+          
+          # Agar Unresolved reference hai toh wo bhi pakad lega
+          grep -i "unresolved reference" full_build.log | head -n 20 >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-
-          # 4. Fallback Log agar upar kuch match na ho
-          if [ -z "$KOTLIN_ERR" ] && [ -z "$AAPT_ERR" ]; then
-            echo "### ⚪ 4. RAW LOG TAIL (Aakhiri 35 Lines):" >> $GITHUB_STEP_SUMMARY
-            echo '```text' >> $GITHUB_STEP_SUMMARY
-            tail -n 35 full_build.log >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-          fi
-
           exit 1
         fi
 
@@ -83,11 +56,3 @@ jobs:
       with:
         name: NexAI-Debug-APK
         path: "**/build/outputs/apk/debug/*.apk"
-
-    - name: 7. Save Full Log File
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: Complete-Build-Log
-        path: full_build.log
-        
