@@ -30,8 +30,8 @@ class VoiceManager(
             updateTtsLanguage()
             isTtsReady = true
 
-            // Agar initialization se pehle koi text aaya tha (jaise 'Hello Sir'), to use turant bolo
-            pendingSpeech?.let { textToSpeak ->
+            val textToSpeak = pendingSpeech
+            if (textToSpeak != null) {
                 speak(textToSpeak)
                 pendingSpeech = null
             }
@@ -45,7 +45,7 @@ class VoiceManager(
             "Urdu" -> Locale("ur", "PK")
             "Bengali" -> Locale("bn", "IN")
             "Punjabi" -> Locale("pa", "IN")
-            else -> Locale("hi", "IN") // Hinglish default
+            else -> Locale("hi", "IN")
         }
     }
 
@@ -92,7 +92,7 @@ class VoiceManager(
 
     fun startListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            onError("Phone me Google Speech Recognition engine available nahi hai.")
+            onError("Google Speech Recognition engine is device me available nahi hai.")
             return
         }
 
@@ -108,6 +108,22 @@ class VoiceManager(
 
                     override fun onError(error: Int) {
                         val message = when (error) {
-                            SpeechRecognizer.ERROR_NO_MATCH -> "Kuch sunai nahi diya, kripya thoda saaf aur tez boliye."
-                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Timeout: Mic dabate hi bolna shuru karein."
-                            SpeechRecognizer.ERROR_AUDIO -> "Audio recording me dikk
+                            SpeechRecognizer.ERROR_NO_MATCH -> "Kuch sunai nahi diya, kripya saaf boliye."
+                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Samay samapt. Kripya mic dabakar turant boliye."
+                            SpeechRecognizer.ERROR_AUDIO -> "Audio recording me dikkat aayi."
+                            SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Internet check karein."
+                            else -> "Kripya dobara boliye."
+                        }
+                        onError(message)
+                    }
+
+                    override fun onResults(results: Bundle?) {
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        if (!matches.isNullOrEmpty()) {
+                            onSpeechResult(matches[0])
+                        } else {
+                            onError("Kuch sunai nahi diya.")
+                        }
+                    }
+
+                    override fun onPartialResults(partialResults:
