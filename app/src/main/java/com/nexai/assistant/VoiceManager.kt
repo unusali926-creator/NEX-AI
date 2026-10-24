@@ -4,10 +4,13 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import java.util.Locale
 
@@ -15,6 +18,7 @@ class VoiceManager(
     private val context: Context,
     private val prefs: PreferencesManager,
     private val onSpeechResult: (String) -> Unit,
+    private val onSpeechFinished: (() -> Unit)? = null,
     private val onError: (String) -> Unit
 ) : TextToSpeech.OnInitListener {
 
@@ -23,6 +27,7 @@ class VoiceManager(
     private var isTtsReady = false
     private var pendingSpeech: String? = null
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     init {
         tts = TextToSpeech(context.applicationContext, this)
@@ -30,7 +35,8 @@ class VoiceManager(
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            setupProfessionalHdVoice()
+            setupProfessionalVoice()
+            setupUtteranceListener()
             isTtsReady = true
 
             val queued = pendingSpeech
@@ -43,15 +49,28 @@ class VoiceManager(
         }
     }
 
-    private fun setupProfessionalHdVoice() {
-        // High Quality Natural Voice selection without robotic distortions
+    private fun setupUtteranceListener() {
+        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+
+            override fun onDone(utteranceId: String?) {
+                // Bolna khatam hote hi mic ko bina touch kiye dobara on karne ka trigger
+                mainHandler.post {
+                    onSpeechFinished?.invoke()
+                }
+            }
+
+            override fun onError(utteranceId: String?) {}
+        })
+    }
+
+    private fun setupProfessionalVoice() {
         val targetLocale = Locale("en", "IN")
         var res = tts?.setLanguage(targetLocale)
         if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
             tts?.language = Locale.US
         }
 
-        // Select the highest quality HD voice available on the device
         try {
             val availableVoices = tts?.voices
             if (!availableVoices.isNullOrEmpty()) {
@@ -66,10 +85,9 @@ class VoiceManager(
                 }
             }
         } catch (e: Exception) {
-            // Fallback to default engine configuration
+            // Default voice fallback
         }
 
-        // Clean natural pitch (1.0f = no distortion, studio clear)
         tts?.setPitch(1.0f)
         tts?.setSpeechRate(1.05f)
     }
@@ -87,7 +105,7 @@ class VoiceManager(
 
     fun startListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            onError("Speech recognition hardware unavailable.")
+            onError("Speech recognition unavailable.")
             return
         }
 
@@ -103,11 +121,11 @@ class VoiceManager(
 
                     override fun onError(error: Int) {
                         val message = when (error) {
-                            SpeechRecognizer.ERROR_NO_MATCH -> "No speech matched. Please command again, Sir."
+                            SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected."
                             SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Listening timed out."
                             SpeechRecognizer.ERROR_AUDIO -> "Audio hardware busy."
-                            SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network connection required."
-                            else -> "Awaiting voice command."
+                            SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network required."
+                            else -> "Listening paused."
                         }
                         onError(message)
                     }
@@ -117,7 +135,7 @@ class VoiceManager(
                         if (!matches.isNullOrEmpty()) {
                             onSpeechResult(matches[0])
                         } else {
-                            onError("Awaiting instructions, Sir.")
+                            onError("Awaiting speech.")
                         }
                     }
 
@@ -136,14 +154,15 @@ class VoiceManager(
             }
             speechRecognizer?.startListening(intent)
         } catch (e: Exception) {
-            onError("Microphone error: " + (e.message ?: "hardware error"))
+            onError("Mic error: " + (e.message ?: "unknown"))
         }
     }
 
     fun speak(text: String) {
         ensureAudibleVolume()
         if (isTtsReady) {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "NexProfessionalVoice")
+            val params = Bundle()
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "NexUtt_${System.currentTimeMillis()}")
         } else {
             pendingSpeech = text
         }
