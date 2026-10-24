@@ -10,7 +10,7 @@ import java.net.URL
 import java.net.URLEncoder
 
 class GeminiRepository(
-    private val preferencesManager: PreferencesManager? = null,
+    private val prefs: PreferencesManager? = null,
     private val groqApiKey: String = ""
 ) {
 
@@ -23,20 +23,16 @@ class GeminiRepository(
         - Turn on flashlight: [ACTION:FLASHLIGHT_ON]
         - Turn off flashlight: [ACTION:FLASHLIGHT_OFF]
         - Check battery: [ACTION:BATTERY]
-        - Max volume: [ACTION:VOLUME_MAX]
-        - Mute volume: [ACTION:VOLUME_MUTE]
         - Open WhatsApp: [ACTION:OPEN_WHATSAPP]
         - Open YouTube: [ACTION:OPEN_YOUTUBE]
         - Open Camera: [ACTION:OPEN_CAMERA]
     """.trimIndent()
 
-    // MainActivity ke call ke liye exact match
     suspend fun getResponse(
         chatHistory: List<ChatMessage>,
         userMessage: String
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            // 1. Check if Groq key is available
             val activeKey = if (groqApiKey.isNotBlank() && groqApiKey != "APNI_KEY_YAHAN_DALO") {
                 groqApiKey
             } else {
@@ -48,7 +44,6 @@ class GeminiRepository(
                 if (groqReply != null) return@withContext Result.success(groqReply)
             }
 
-            // 2. Fallback: Free Zero-Key Pollinations Engine
             val pollReply = callPollinations(userMessage)
             Result.success(pollReply)
         } catch (e: Exception) {
@@ -56,7 +51,6 @@ class GeminiRepository(
         }
     }
 
-    // Overload for single parameter calls
     suspend fun getResponse(userMessage: String): Result<String> {
         return getResponse(emptyList(), userMessage)
     }
