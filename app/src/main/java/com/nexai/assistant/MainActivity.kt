@@ -51,6 +51,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -240,6 +241,7 @@ fun MainMasterScreen(
     onBindVoiceHandler: (((String) -> Unit)) -> Unit,
     onStartVoiceListening: () -> Unit
 ) {
+    val context = LocalContext.current
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var isMasterActive by remember { mutableStateOf(prefs.isMasterActive) }
@@ -594,7 +596,7 @@ fun MainMasterScreen(
                             onClick = {
                                 onVibrate()
                                 if (ContextCompat.checkSelfPermission(
-                                        this@MainActivity,
+                                        context,
                                         Manifest.permission.RECORD_AUDIO
                                     ) == PackageManager.PERMISSION_GRANTED
                                 ) {
@@ -831,7 +833,7 @@ fun MasterSettingsDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Nex AI Controls", color = TextWhite, fontSize = 18.sp)
                 Spacer(modifier = Modifier.weight(1f))
-                Text("v3.7 Ultra", color = AccentCyan, fontSize = 11.sp)
+                Text("v3.8 Final", color = AccentCyan, fontSize = 11.sp)
             }
         },
         text = {
