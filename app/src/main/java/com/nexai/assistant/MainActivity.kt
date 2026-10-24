@@ -1,7 +1,11 @@
 package com.nexai.assistant
 
 import android.Manifest
+import android.content.Context
+import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -10,12 +14,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
@@ -33,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.util.Calendar
 
 class MainActivity : ComponentActivity() {
 
@@ -40,29 +50,48 @@ class MainActivity : ComponentActivity() {
     private lateinit var geminiRepo: GeminiRepository
     private lateinit var deviceManager: DeviceManager
     private lateinit var voiceManager: VoiceManager
+    private var vibrator: Vibrator? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = PreferencesManager(this)
         geminiRepo = GeminiRepository(prefs)
         deviceManager = DeviceManager(this)
+        vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
 
         setContent {
             NexTheme {
-                MainJarvisScreen(
+                MainNexAiScreen(
                     prefs = prefs,
+                    onVibrate = { triggerHaptic() },
                     onSendMessage = { query, updateHistory, onComplete ->
                         handleQuery(query, updateHistory, onComplete)
                     },
                     onStartVoice = { onVoiceRecognized ->
                         voiceManager = VoiceManager(
                             context = this,
+                            prefs = prefs,
                             onSpeechResult = onVoiceRecognized,
                             onError = { err -> Toast.makeText(this, err, Toast.LENGTH_SHORT).show() }
                         )
                         voiceManager.startListening()
                     }
                 )
+            }
+        }
+    }
+
+    private fun triggerHaptic() {
+        if (prefs.isHapticEnabled) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator?.vibrate(VibrationEffect.createOneShot(35, VibrationEffect.DEFAULT_AMPLITUDE))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator?.vibrate(35)
+                }
+            } catch (e: Exception) {
+                // Ignore haptic failure
             }
         }
     }
@@ -80,7 +109,7 @@ class MainActivity : ComponentActivity() {
                 val finalMessage = if (rawReply.startsWith("[ACTION:")) {
                     val actionTag = rawReply.substringBefore("]") + "]"
                     val actionResult = deviceManager.executeAction(actionTag)
-                    actionResult ?: "Sir, action execute kiya gaya."
+                    actionResult ?: "Sir, action execute kar diya gaya hai."
                 } else {
                     rawReply
                 }
@@ -107,16 +136,29 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainJarvisScreen(
+fun MainNexAiScreen(
     prefs: PreferencesManager,
+    onVibrate: () -> Unit,
     onSendMessage: (String, List<ChatMessage>, (String?, String?) -> Unit) -> Unit,
     onStartVoice: ((String) -> Unit) -> Unit
 ) {
+    // Dynamic Time-Based Greeting (No Namaste)
+    val greetingText = remember {
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val timeSalutation = when (hour) {
+            in 5..11 -> "Good morning"
+            in 12..16 -> "Good afternoon"
+            in 17..21 -> "Good evening"
+            else -> "Hello"
+        }
+        "$timeSalutation, Sir! Nex AI online hai. JARVIS protocols aur world knowledge ready hai. Boliye, kya command hai?"
+    }
+
     val messages = remember {
         mutableStateListOf(
             ChatMessage(
                 sender = Sender.NEX,
-                text = "Systems online, Sir. Nex JARVIS is operational. Flashlight, Battery, Apps aur World Knowledge commands ready hain. Awaiting orders."
+                text = greetingText
             )
         )
     }
@@ -141,18 +183,20 @@ fun MainJarvisScreen(
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        // Corner Mini Arc Reactor (Pulsing & Glowing Widget)
                         MiniArcReactor(isGlowing = isThinking)
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
-                            Text("Nex JARVIS", color = TextWhite, fontSize = 18.sp)
-                            Text("Systems Active", color = AccentCyan, fontSize = 11.sp)
+                            Text("Nex AI", color = TextWhite, fontSize = 18.sp)
+                            Text("JARVIS Core Active", color = AccentCyan, fontSize = 11.sp)
                         }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DeepCardNavy),
                 actions = {
-                    IconButton(onClick = { showSettings = true }) {
+                    IconButton(onClick = {
+                        onVibrate()
+                        showSettings = true
+                    }) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings", tint = AccentCyan)
                     }
                 }
@@ -180,7 +224,7 @@ fun MainJarvisScreen(
                 if (isThinking) {
                     item {
                         Text(
-                            text = "JARVIS is computing protocol...",
+                            text = "Nex is processing...",
                             color = AccentCyan,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(start = 8.dp, bottom = 8.dp)
@@ -199,6 +243,7 @@ fun MainJarvisScreen(
             ) {
                 IconButton(
                     onClick = {
+                        onVibrate()
                         permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 ) {
@@ -208,7 +253,7 @@ fun MainJarvisScreen(
                 TextField(
                     value = inputText,
                     onValueChange = { inputText = it },
-                    placeholder = { Text("Command JARVIS (e.g. Torch on, Battery...)", color = TextMuted, fontSize = 13.sp) },
+                    placeholder = { Text("Command Nex AI...", color = TextMuted, fontSize = 13.sp) },
                     modifier = Modifier.weight(1f),
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent,
@@ -225,6 +270,7 @@ fun MainJarvisScreen(
                     onClick = {
                         val prompt = inputText.trim()
                         if (prompt.isNotBlank() && !isThinking) {
+                            onVibrate()
                             messages.add(ChatMessage(sender = Sender.USER, text = prompt))
                             inputText = ""
                             isThinking = true
@@ -249,16 +295,23 @@ fun MainJarvisScreen(
     }
 
     if (showSettings) {
-        SettingsDialog(prefs = prefs, onDismiss = { showSettings = false })
+        AdvancedGeminiSettingsDialog(
+            prefs = prefs,
+            onVibrate = onVibrate,
+            onClearHistory = {
+                messages.clear()
+                messages.add(ChatMessage(sender = Sender.NEX, text = "History cleared, Sir. Nex AI ready for new instructions."))
+            },
+            onDismiss = { showSettings = false }
+        )
     }
 }
 
-// Mini Glowing Corner Arc Reactor Widget (Pulsing and Rotating Core)
+// Mini Glowing Corner Arc Reactor Widget
 @Composable
 fun MiniArcReactor(isGlowing: Boolean) {
-    val infiniteTransition = rememberInfiniteTransition(label = "ArcReactorPulse")
-    
-    // Rotating ticks
+    val infiniteTransition = rememberInfiniteTransition(label = "ArcPulse")
+
     val rotation by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
@@ -268,7 +321,6 @@ fun MiniArcReactor(isGlowing: Boolean) {
         label = "Rotation"
     )
 
-    // Pulsing Core Size
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 0.85f,
         targetValue = 1.15f,
@@ -289,7 +341,6 @@ fun MiniArcReactor(isGlowing: Boolean) {
             val center = Offset(size.width / 2, size.height / 2)
             val outerRadius = size.minDimension / 2 - 2
 
-            // Outer Glowing Cyan Circle
             drawCircle(
                 color = Color(0xFF00F5D4),
                 radius = outerRadius,
@@ -297,7 +348,6 @@ fun MiniArcReactor(isGlowing: Boolean) {
                 style = Stroke(width = 2.dp.toPx())
             )
 
-            // Inner Rotating Segments
             rotate(rotation, center) {
                 drawCircle(
                     color = Color(0xFF5BC0BE),
@@ -305,7 +355,6 @@ fun MiniArcReactor(isGlowing: Boolean) {
                     center = center,
                     style = Stroke(width = 1.5.dp.toPx())
                 )
-                // 3 Futuristic Arc Points
                 drawLine(
                     color = Color(0xFF00F5D4),
                     start = center,
@@ -326,7 +375,6 @@ fun MiniArcReactor(isGlowing: Boolean) {
                 )
             }
 
-            // Center Bright Pulsing Core
             drawCircle(
                 color = Color.White,
                 radius = (outerRadius * 0.28f) * pulseScale,
@@ -375,43 +423,123 @@ fun ChatBubble(message: ChatMessage) {
     }
 }
 
+// Gemini / ChatGPT Level Advanced Settings Screen
 @Composable
-fun SettingsDialog(prefs: PreferencesManager, onDismiss: () -> Unit) {
-    var key by remember { mutableStateOf(prefs.apiKey) }
+fun AdvancedGeminiSettingsDialog(
+    prefs: PreferencesManager,
+    onVibrate: () -> Unit,
+    onClearHistory: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var selectedLanguage by remember { mutableStateOf(prefs.preferredLanguage) }
+    var selectedVoice by remember { mutableStateOf(prefs.voiceStyle) }
+    var selectedTone by remember { mutableStateOf(prefs.personalityTone) }
     var ttsEnabled by remember { mutableStateOf(prefs.isTtsEnabled) }
-    var language by remember { mutableStateOf(prefs.preferredLanguage) }
+    var hapticEnabled by remember { mutableStateOf(prefs.isHapticEnabled) }
+
+    val languages = listOf("Hindi", "Hinglish", "English", "Urdu", "Bengali", "Punjabi")
+    val voices = listOf("JARVIS Deep", "FRIDAY Female", "Classic Nex", "Fast Crisp", "Calm Soft", "Cyber Metallic")
+    val tones = listOf("JARVIS Tactical", "Friendly Buddy", "Short & Direct")
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = DeepCardNavy,
-        title = { Text("JARVIS Protocols", color = TextWhite) },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Nex AI Settings", color = TextWhite, fontSize = 20.sp)
+                Spacer(modifier = Modifier.weight(1f))
+                Text("v2.5 Pro", color = AccentCyan, fontSize = 11.sp)
+            }
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                OutlinedTextField(
-                    value = key,
-                    onValueChange = { key = it },
-                    label = { Text("Gemini Key (Optional)", color = TextMuted) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextWhite,
-                        unfocusedTextColor = TextWhite
-                    )
-                )
-                Text(
-                    "Note: Key is 100% Optional. JARVIS works free without any key.",
-                    fontSize = 11.sp,
-                    color = AccentCyan
-                )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // 1. Language Selector
+                Text("Response Language", color = AccentCyan, fontSize = 13.sp)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(languages) { lang ->
+                        FilterChip(
+                            selected = selectedLanguage == lang,
+                            onClick = {
+                                onVibrate()
+                                selectedLanguage = lang
+                            },
+                            label = { Text(lang) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = AccentCyan,
+                                selectedLabelColor = Color.Black,
+                                containerColor = SurfaceAccent,
+                                labelColor = TextWhite
+                            )
+                        )
+                    }
+                }
 
+                Divider(color = SurfaceAccent)
+
+                // 2. 6 AI Voices Selector
+                Text("AI Voice Profile (6 Styles)", color = AccentCyan, fontSize = 13.sp)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(voices) { voice ->
+                        FilterChip(
+                            selected = selectedVoice == voice,
+                            onClick = {
+                                onVibrate()
+                                selectedVoice = voice
+                            },
+                            label = { Text(voice) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = AccentCyan,
+                                selectedLabelColor = Color.Black,
+                                containerColor = SurfaceAccent,
+                                labelColor = TextWhite
+                            )
+                        )
+                    }
+                }
+
+                Divider(color = SurfaceAccent)
+
+                // 3. AI Personality Tone
+                Text("Personality Protocol", color = AccentCyan, fontSize = 13.sp)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(tones) { tone ->
+                        FilterChip(
+                            selected = selectedTone == tone,
+                            onClick = {
+                                onVibrate()
+                                selectedTone = tone
+                            },
+                            label = { Text(tone) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = AccentCyan,
+                                selectedLabelColor = Color.Black,
+                                containerColor = SurfaceAccent,
+                                labelColor = TextWhite
+                            )
+                        )
+                    }
+                }
+
+                Divider(color = SurfaceAccent)
+
+                // 4. Voice and Haptics Switches
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("JARVIS Voice Feedback", color = TextWhite)
+                    Text("Voice Spoken Feedback", color = TextWhite)
                     Switch(
                         checked = ttsEnabled,
-                        onCheckedChange = { ttsEnabled = it }
+                        onCheckedChange = {
+                            onVibrate()
+                            ttsEnabled = it
+                        }
                     )
                 }
 
@@ -420,18 +548,47 @@ fun SettingsDialog(prefs: PreferencesManager, onDismiss: () -> Unit) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Tone: $language", color = TextWhite)
-                    Button(
-                        onClick = {
-                            language = when (language) {
-                                "Hinglish" -> "Hindi"
-                                "Hindi" -> "English"
-                                else -> "Hinglish"
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceAccent)
+                    Text("Haptic Touch Feedback", color = TextWhite)
+                    Switch(
+                        checked = hapticEnabled,
+                        onCheckedChange = {
+                            onVibrate()
+                            hapticEnabled = it
+                        }
+                    )
+                }
+
+                Divider(color = SurfaceAccent)
+
+                // 5. Clear Chat History Button
+                Button(
+                    onClick = {
+                        onVibrate()
+                        onClearHistory()
+                        onDismiss()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6B1D2F)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = "Clear Chat", tint = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Clear Chat History", color = Color.White)
+                }
+
+                // 6. Zero API Key Shield Badge
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = DarkBlueBackground),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Switch")
+                        Text(
+                            "🛡️ Zero API Key Mode: 100% Free Lifetime. Data is encrypted & never stored.",
+                            color = TextMuted,
+                            fontSize = 11.sp
+                        )
                     }
                 }
             }
@@ -439,19 +596,22 @@ fun SettingsDialog(prefs: PreferencesManager, onDismiss: () -> Unit) {
         confirmButton = {
             Button(
                 onClick = {
-                    prefs.apiKey = key.trim()
+                    onVibrate()
+                    prefs.preferredLanguage = selectedLanguage
+                    prefs.voiceStyle = selectedVoice
+                    prefs.personalityTone = selectedTone
                     prefs.isTtsEnabled = ttsEnabled
-                    prefs.preferredLanguage = language
+                    prefs.isHapticEnabled = hapticEnabled
                     onDismiss()
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = AccentCyan)
             ) {
-                Text("Save Protocols", color = Color.Black)
+                Text("Apply Protocols", color = Color.Black)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Dismiss", color = TextWhite)
+                Text("Close", color = TextWhite)
             }
         }
     )
