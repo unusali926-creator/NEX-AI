@@ -11,7 +11,7 @@ import java.net.URLEncoder
 
 class GeminiRepository(
     private val prefs: PreferencesManager? = null,
-    private val groqApiKey: String = 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
+    private val groqApiKey: String = "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"
 ) {
 
     private val systemPrompt = """
