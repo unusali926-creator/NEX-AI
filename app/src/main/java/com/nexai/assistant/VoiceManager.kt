@@ -17,13 +17,24 @@ class VoiceManager(
 ) : TextToSpeech.OnInitListener {
 
     private var speechRecognizer: SpeechRecognizer? = null
-    private var tts: TextToSpeech? = TextToSpeech(context, this)
+    private var tts: TextToSpeech? = null
     private var isTtsReady = false
+    private var pendingSpeech: String? = null
+
+    init {
+        tts = TextToSpeech(context, this)
+    }
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             updateTtsLanguage()
             isTtsReady = true
+
+            // Agar initialization se pehle koi text aaya tha (jaise 'Hello Sir'), to use turant bolo
+            pendingSpeech?.let { textToSpeak ->
+                speak(textToSpeak)
+                pendingSpeech = null
+            }
         }
     }
 
@@ -49,27 +60,27 @@ class VoiceManager(
     private fun applyVoicePreset() {
         when (prefs.voiceStyle) {
             "JARVIS Deep" -> {
-                tts?.setPitch(0.72f) // Deep robotic bass
+                tts?.setPitch(0.72f)
                 tts?.setSpeechRate(1.05f)
             }
             "FRIDAY Female" -> {
-                tts?.setPitch(1.25f) // Crisp smooth female pitch
+                tts?.setPitch(1.25f)
                 tts?.setSpeechRate(1.0f)
             }
             "Classic Nex" -> {
-                tts?.setPitch(1.0f) // Balanced natural voice
+                tts?.setPitch(1.0f)
                 tts?.setSpeechRate(1.0f)
             }
             "Fast Crisp" -> {
                 tts?.setPitch(1.05f)
-                tts?.setSpeechRate(1.25f) // Fast response speed
+                tts?.setSpeechRate(1.25f)
             }
             "Calm Soft" -> {
                 tts?.setPitch(0.95f)
-                tts?.setSpeechRate(0.85f) // Relaxed & gentle
+                tts?.setSpeechRate(0.85f)
             }
             "Cyber Metallic" -> {
-                tts?.setPitch(0.58f) // Heavy metallic tone
+                tts?.setPitch(0.58f)
                 tts?.setSpeechRate(1.15f)
             }
             else -> {
@@ -81,7 +92,7 @@ class VoiceManager(
 
     fun startListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            onError("Google Speech Recognition engine is device me available nahi hai.")
+            onError("Phone me Google Speech Recognition engine available nahi hai.")
             return
         }
 
@@ -97,61 +108,6 @@ class VoiceManager(
 
                     override fun onError(error: Int) {
                         val message = when (error) {
-                            SpeechRecognizer.ERROR_NO_MATCH -> "Kuch sunai nahi diya, kripya mic daba kar saaf aur thoda tez boliye."
-                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Samay samapt. Mic dabate hi bolna shuru karein."
-                            SpeechRecognizer.ERROR_AUDIO -> "Audio recording me dikkat aayi."
-                            SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Internet slow hai, connection check karein."
-                            else -> "Kripya dobara boliye."
-                        }
-                        onError(message)
-                    }
-
-                    override fun onResults(results: Bundle?) {
-                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        if (!matches.isNullOrEmpty()) {
-                            onSpeechResult(matches[0])
-                        } else {
-                            onError("Kuch sunai nahi diya, dobara boliye.")
-                        }
-                    }
-
-                    override fun onPartialResults(partialResults: Bundle?) {}
-                    override fun onEvent(eventType: Int, params: Bundle?) {}
-                })
-            }
-
-            val targetLocale = getSelectedLocale()
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, targetLocale.toString())
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, targetLocale.toString())
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-            }
-            speechRecognizer?.startListening(intent)
-        } catch (e: Exception) {
-            onError("Mic chalu karne me dikkat aayi: ${e.localizedMessage}")
-        }
-    }
-
-    fun speak(text: String) {
-        if (isTtsReady) {
-            updateTtsLanguage()
-            applyVoicePreset()
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "NexTTS")
-        }
-    }
-
-    fun stop() {
-        try {
-            speechRecognizer?.stopListening()
-            speechRecognizer?.destroy()
-            speechRecognizer = null
-            tts?.stop()
-            tts?.shutdown()
-        } catch (e: Exception) {
-            // Cleanup
-        }
-    }
-}
+                            SpeechRecognizer.ERROR_NO_MATCH -> "Kuch sunai nahi diya, kripya thoda saaf aur tez boliye."
+                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Timeout: Mic dabate hi bolna shuru karein."
+                            SpeechRecognizer.ERROR_AUDIO -> "Audio recording me dikk
