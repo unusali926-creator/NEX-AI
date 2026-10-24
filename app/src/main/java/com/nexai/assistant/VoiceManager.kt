@@ -2,7 +2,6 @@ package com.nexai.assistant
 
 import android.content.Context
 import android.content.Intent
-import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -10,109 +9,121 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
-import android.speech.tts.Voice
 import java.util.Locale
 
 class VoiceManager(
     private val context: Context,
-    private val prefs: PreferencesManager,
-    private val onSpeechResult: (String) -> Unit,
-    private val onSpeechFinished: (() -> Unit)? = null,
-    private val onError: (String) -> Unit
+    private val onSpeechResult: ((String) -> Unit)? = null
 ) : TextToSpeech.OnInitListener {
 
-    private var speechRecognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
+    private var speechRecognizer: SpeechRecognizer? = null
     private var isTtsReady = false
-    private var pendingSpeech: String? = null
-    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+    private val pendingSpeechQueue = mutableListOf<String>()
     private val mainHandler = Handler(Looper.getMainLooper())
 
     init {
-        tts = TextToSpeech(context.applicationContext, this)
+        initTTS()
+    }
+
+    private fun initTTS() {
+        mainHandler.post {
+            tts = TextToSpeech(context.applicationContext, this)
+        }
     }
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            setupProfessionalVoice()
-            setupUtteranceListener()
             isTtsReady = true
-
-            val queued = pendingSpeech
-            if (queued != null) {
-                speak(queued)
-                pendingSpeech = null
-            }
-        } else {
-            onError("TTS engine offline.")
-        }
-    }
-
-    private fun setupUtteranceListener() {
-        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {}
-
-            override fun onDone(utteranceId: String?) {
-                // Bolna khatam hote hi mic ko bina touch kiye dobara on karne ka trigger
-                mainHandler.post {
-                    onSpeechFinished?.invoke()
+            tts?.language = Locale.ENGLISH
+            setVoicePreset("JARVIS Deep")
+            synchronized(pendingSpeechQueue) {
+                for (text in pendingSpeechQueue) {
+                    speak(text)
                 }
+                pendingSpeechQueue.clear()
             }
-
-            override fun onError(utteranceId: String?) {}
-        })
+        }
     }
 
-    private fun setupProfessionalVoice() {
-        val targetLocale = Locale("en", "IN")
-        var res = tts?.setLanguage(targetLocale)
-        if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
-            tts?.language = Locale.US
-        }
-
-        try {
-            val availableVoices = tts?.voices
-            if (!availableVoices.isNullOrEmpty()) {
-                val bestVoice = availableVoices.firstOrNull { voice ->
-                    !voice.isNetworkConnectionRequired &&
-                            (voice.quality >= Voice.QUALITY_HIGH) &&
-                            (voice.locale.language == "en" || voice.locale.language == "hi")
-                } ?: availableVoices.firstOrNull { it.locale.language == "en" }
-
-                if (bestVoice != null) {
-                    tts?.voice = bestVoice
+    fun speak(text: String) {
+        mainHandler.post {
+            if (!isTtsReady || tts == null) {
+                synchronized(pendingSpeechQueue) {
+                    pendingSpeechQueue.add(text)
                 }
+                return@post
             }
-        } catch (e: Exception) {
-            // Default voice fallback
-        }
-
-        tts?.setPitch(1.0f)
-        tts?.setSpeechRate(1.05f)
-    }
-
-    fun ensureAudibleVolume() {
-        try {
-            audioManager?.let {
-                val maxVol = it.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                it.setStreamVolume(AudioManager.STREAM_MUSIC, (maxVol * 0.85f).toInt(), AudioManager.FLAG_SHOW_UI)
-            }
-        } catch (e: Exception) {
-            // Ignore
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "NEX_TTS_ID")
         }
     }
 
-    fun startListening() {
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            onError("Speech recognition unavailable.")
-            return
+    fun setVoicePreset(preset: String) {
+        when (preset) {
+            "JARVIS Deep" -> {
+                tts?.setPitch(0.75f)
+                tts?.setSpeechRate(0.95f)
+            }
+            "FRIDAY Female" -> {
+                tts?.setPitch(1.3f)
+                tts?.setSpeechRate(1.05f)
+            }
+            "Classic" -> {
+                tts?.setPitch(1.0f)
+                tts?.setSpeechRate(1.0f)
+            }
+            "Fast Crisp" -> {
+                tts?.setPitch(1.0f)
+                tts?.setSpeechRate(1.2f)
+            }
+            "Calm Soft" -> {
+                tts?.setPitch(0.9f)
+                tts?.setSpeechRate(0.85f)
+            }
+            "Cyber Metallic" -> {
+                tts?.setPitch(0.6f)
+                tts?.setSpeechRate(1.1f)
+            }
+            else -> {
+                tts?.setPitch(0.8f)
+                tts?.setSpeechRate(1.0f)
+            }
         }
+    }
 
-        try {
-            speechRecognizer?.destroy()
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
-                setRecognitionListener(object : RecognitionListener {
+    // MainActivity ke calls ke liye Overloaded Listeners
+    fun startListening(
+        onResult: (String) -> Unit,
+        onError: ((String) -> Unit)? = null
+    ) {
+        // Hamesha Main UI Thread par run karna zaroori hai
+        mainHandler.post {
+            try {
+                stopListening()
+
+                if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+                    onError?.invoke("Device par Speech Engine available nahi hai")
+                    return@post
+                }
+
+                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context.applicationContext)
+                
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toString())
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hi-IN")
+                    putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("en-IN", "hi-IN", "en-US"))
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                    putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                    
+                    // Timeouts badha diye gaye hain taaki turant cut na ho
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 4000L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
+                }
+
+                speechRecognizer?.setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) {}
                     override fun onBeginningOfSpeech() {}
                     override fun onRmsChanged(rmsdB: Float) {}
@@ -121,62 +132,61 @@ class VoiceManager(
 
                     override fun onError(error: Int) {
                         val message = when (error) {
-                            SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected."
-                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Listening timed out."
-                            SpeechRecognizer.ERROR_AUDIO -> "Audio hardware busy."
-                            SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network required."
-                            else -> "Listening paused."
+                            SpeechRecognizer.ERROR_NO_MATCH -> "Aawaz saaf nahi aayi, dobara boliye Sir..."
+                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Timeout. Boliye Sir..."
+                            SpeechRecognizer.ERROR_AUDIO -> "Mic recording error"
+                            SpeechRecognizer.ERROR_NETWORK -> "Network issue"
+                            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Mic permission missing"
+                            else -> "Mic code: $error"
                         }
-                        onError(message)
+                        onError?.invoke(message)
                     }
 
                     override fun onResults(results: Bundle?) {
                         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         if (!matches.isNullOrEmpty()) {
-                            onSpeechResult(matches[0])
+                            val spokenText = matches[0]
+                            onResult(spokenText)
+                            onSpeechResult?.invoke(spokenText)
                         } else {
-                            onError("Awaiting speech.")
+                            onError?.invoke("Aawaz detect nahi hui")
                         }
                     }
 
                     override fun onPartialResults(partialResults: Bundle?) {}
                     override fun onEvent(eventType: Int, params: Bundle?) {}
                 })
+
+                speechRecognizer?.startListening(intent)
+            } catch (e: Exception) {
+                onError?.invoke("Mic crash error: ${e.message}")
             }
+        }
 
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN")
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hi-IN")
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        fun startListening(onResult: (String) -> Unit) {
+            startListening(onResult, null)
+        }
+
+        fun stopListening() {
+            mainHandler.post {
+                try {
+                    speechRecognizer?.stopListening()
+                    speechRecognizer?.cancel()
+                    speechRecognizer?.destroy()
+                    speechRecognizer = null
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
-            speechRecognizer?.startListening(intent)
-        } catch (e: Exception) {
-            onError("Mic error: " + (e.message ?: "unknown"))
         }
-    }
 
-    fun speak(text: String) {
-        ensureAudibleVolume()
-        if (isTtsReady) {
-            val params = Bundle()
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "NexUtt_${System.currentTimeMillis()}")
-        } else {
-            pendingSpeech = text
-        }
-    }
-
-    fun stop() {
-        try {
-            speechRecognizer?.stopListening()
-            speechRecognizer?.destroy()
-            speechRecognizer = null
-            tts?.stop()
-            tts?.shutdown()
-        } catch (e: Exception) {
-            // Ignore
+        fun destroy() {
+            stopListening()
+            mainHandler.post {
+                tts?.stop()
+                tts?.shutdown()
+                tts = null
+            }
         }
     }
 }
