@@ -7,21 +7,22 @@ import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.net.Uri
 import android.os.BatteryManager
+import android.os.Build
 import android.provider.AlarmClock
 import android.provider.MediaStore
 import android.provider.Settings
+import androidx.core.content.ContextCompat
 
 class DeviceManager(private val context: Context) {
 
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-    private var isTorchOn = false
 
     fun toggleTorch(enable: Boolean): String {
         return try {
-            val cameraId = cameraManager?.cameraIdList?.firstOrNull() ?: return "Sir, camera flash hardware detect nahi hua."
+            val cameraId = cameraManager?.cameraIdList?.firstOrNull()
+                ?: return "Sir, camera flash hardware detect nahi hua."
             cameraManager.setTorchMode(cameraId, enable)
-            isTorchOn = enable
             if (enable) "Sir, Flashlight on kar di gayi hai." else "Sir, Flashlight band kar di gayi hai."
         } catch (e: Exception) {
             "Sir, Flashlight control karne me dikkat aayi: ${e.localizedMessage}"
@@ -38,10 +39,10 @@ class DeviceManager(private val context: Context) {
             val status = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
             val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
 
-            val chargeText = if (isCharging) "Charging ho rahi hai" else "Battery discharge ho rahi hai"
-            "Sir, battery level $batteryPct% hai aur $chargeText. All systems normal."
+            val chargeText = if (isCharging) "Charging active hai" else "Battery discharge ho rahi hai"
+            "Sir, battery level $batteryPct% hai aur $chargeText. System power normal."
         } catch (e: Exception) {
-            "Sir, battery status check karne me dikkat aayi."
+            "Sir, battery status check nahi ho saka."
         }
     }
 
@@ -79,7 +80,21 @@ class DeviceManager(private val context: Context) {
                 "Sir, $appName is phone me install nahi mila."
             }
         } catch (e: Exception) {
-            "Sir, $appName launch nahi ho paya."
+            "Sir, $appName launch karne me dikkat aayi."
+        }
+    }
+
+    fun searchYouTube(query: String): String {
+        return try {
+            val intent = Intent(Intent.ACTION_SEARCH).apply {
+                setPackage("com.google.android.youtube")
+                putExtra("query", query)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            "Sir, YouTube par '$query' play/search kiya ja raha hai."
+        } catch (e: Exception) {
+            openApp("com.google.android.youtube", "YouTube")
         }
     }
 
@@ -89,7 +104,7 @@ class DeviceManager(private val context: Context) {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
-            "Sir, camera open kar diya hai."
+            "Sir, camera launch kar diya gaya hai."
         } catch (e: Exception) {
             "Sir, camera launch karne me dikkat aayi."
         }
@@ -103,7 +118,7 @@ class DeviceManager(private val context: Context) {
             context.startActivity(intent)
             "Sir, $name settings open kar di gayi hai."
         } catch (e: Exception) {
-            "Sir, settings launch nahi ho saki."
+            "Sir, settings open nahi ho saki."
         }
     }
 
@@ -115,11 +130,11 @@ class DeviceManager(private val context: Context) {
             context.startActivity(intent)
             "Sir, dialpad open kar diya hai."
         } catch (e: Exception) {
-            "Sir, phone dialer open nahi hua."
+            "Sir, dialer launch nahi ho paya."
         }
     }
 
-    fun setAlarm(hour: Int, minute: Int, message: String = "Nex JARVIS Alarm"): String {
+    fun setAlarm(hour: Int, minute: Int, message: String = "Nex AI Alarm"): String {
         return try {
             val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
                 putExtra(AlarmClock.EXTRA_HOUR, hour)
@@ -135,22 +150,48 @@ class DeviceManager(private val context: Context) {
         }
     }
 
+    fun toggleBackgroundSentinel(enable: Boolean): String {
+        return try {
+            val serviceIntent = Intent(context, NexVoiceService::class.java)
+            if (enable) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    ContextCompat.startForegroundService(context, serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
+                "Sir, Background Sentinel active hai. Screen off me bhi 'Nex' bol kar wake kar sakte hain."
+            } else {
+                context.stopService(serviceIntent)
+                "Sir, Background Sentinel band kar diya gaya hai."
+            }
+        } catch (e: Exception) {
+            "Sentinel service control karne me dikkat: ${e.localizedMessage}"
+        }
+    }
+
     fun executeAction(actionTag: String): String? {
-        val trimmed = actionTag.trim().uppercase()
+        val trimmed = actionTag.trim()
+        val upper = trimmed.uppercase()
         return when {
-            trimmed.startsWith("[ACTION:TORCH_ON]") -> toggleTorch(true)
-            trimmed.startsWith("[ACTION:TORCH_OFF]") -> toggleTorch(false)
-            trimmed.startsWith("[ACTION:BATTERY]") -> getBatteryReport()
-            trimmed.startsWith("[ACTION:VOLUME_MAX]") -> setMaxVolume()
-            trimmed.startsWith("[ACTION:VOLUME_MUTE]") -> muteVolume()
-            trimmed.startsWith("[ACTION:APP_WHATSAPP]") -> openApp("com.whatsapp", "WhatsApp")
-            trimmed.startsWith("[ACTION:APP_YOUTUBE]") -> openApp("com.google.android.youtube", "YouTube")
-            trimmed.startsWith("[ACTION:APP_INSTAGRAM]") -> openApp("com.instagram.android", "Instagram")
-            trimmed.startsWith("[ACTION:APP_CAMERA]") -> openCamera()
-            trimmed.startsWith("[ACTION:SETTINGS_WIFI]") -> openSettings(Settings.ACTION_WIFI_SETTINGS, "Wi-Fi")
-            trimmed.startsWith("[ACTION:SETTINGS_BLUETOOTH]") -> openSettings(Settings.ACTION_BLUETOOTH_SETTINGS, "Bluetooth")
-            trimmed.startsWith("[ACTION:SETTINGS_MAIN]") -> openSettings(Settings.ACTION_SETTINGS, "Main")
-            trimmed.startsWith("[ACTION:DIALPAD]") -> openDialer()
+            upper.startsWith("[ACTION:TORCH_ON]") -> toggleTorch(true)
+            upper.startsWith("[ACTION:TORCH_OFF]") -> toggleTorch(false)
+            upper.startsWith("[ACTION:BATTERY]") -> getBatteryReport()
+            upper.startsWith("[ACTION:VOLUME_MAX]") -> setMaxVolume()
+            upper.startsWith("[ACTION:VOLUME_MUTE]") -> muteVolume()
+            upper.startsWith("[ACTION:APP_WHATSAPP]") -> openApp("com.whatsapp", "WhatsApp")
+            upper.startsWith("[ACTION:APP_YOUTUBE]") -> openApp("com.google.android.youtube", "YouTube")
+            upper.startsWith("[ACTION:APP_INSTAGRAM]") -> openApp("com.instagram.android", "Instagram")
+            upper.startsWith("[ACTION:APP_CAMERA]") -> openCamera()
+            upper.startsWith("[ACTION:SETTINGS_WIFI]") -> openSettings(Settings.ACTION_WIFI_SETTINGS, "Wi-Fi")
+            upper.startsWith("[ACTION:SETTINGS_BLUETOOTH]") -> openSettings(Settings.ACTION_BLUETOOTH_SETTINGS, "Bluetooth")
+            upper.startsWith("[ACTION:SETTINGS_MAIN]") -> openSettings(Settings.ACTION_SETTINGS, "Main")
+            upper.startsWith("[ACTION:DIALPAD]") -> openDialer()
+            upper.startsWith("[ACTION:SENTINEL_ON]") -> toggleBackgroundSentinel(true)
+            upper.startsWith("[ACTION:SENTINEL_OFF]") -> toggleBackgroundSentinel(false)
+            upper.startsWith("[ACTION:SEARCH_YOUTUBE:") -> {
+                val query = trimmed.substringAfter(":").substringBefore("]")
+                searchYouTube(query)
+            }
             else -> null
         }
     }
