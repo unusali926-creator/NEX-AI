@@ -21,13 +21,25 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FlashlightOn
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -41,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
@@ -49,6 +62,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var prefs: PreferencesManager
     private lateinit var geminiRepo: GeminiRepository
     private lateinit var deviceManager: DeviceManager
+    private lateinit var chatHistoryManager: ChatHistoryManager
     private lateinit var voiceManager: VoiceManager
     private var vibrator: Vibrator? = null
 
@@ -57,24 +71,21 @@ class MainActivity : ComponentActivity() {
         prefs = PreferencesManager(this)
         geminiRepo = GeminiRepository(prefs)
         deviceManager = DeviceManager(this)
+        chatHistoryManager = ChatHistoryManager(this)
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
 
         setContent {
             NexTheme {
-                MainNexAiScreen(
+                MainMasterScreen(
                     prefs = prefs,
+                    deviceManager = deviceManager,
+                    chatHistoryManager = chatHistoryManager,
                     onVibrate = { triggerHaptic() },
-                    onSendMessage = { query, updateHistory, onComplete ->
-                        handleQuery(query, updateHistory, onComplete)
+                    onSendMessage = { query, history, onComplete ->
+                        handleQuery(query, history, onComplete)
                     },
                     onStartVoice = { onVoiceRecognized ->
-                        voiceManager = VoiceManager(
-                            context = this,
-                            prefs = prefs,
-                            onSpeechResult = onVoiceRecognized,
-                            onError = { err -> Toast.makeText(this, err, Toast.LENGTH_SHORT).show() }
-                        )
-                        voiceManager.startListening()
+                        startVoiceInput(onVoiceRecognized)
                     }
                 )
             }
@@ -91,9 +102,19 @@ class MainActivity : ComponentActivity() {
                     vibrator?.vibrate(35)
                 }
             } catch (e: Exception) {
-                // Ignore haptic failure
+                // Ignore haptics exception
             }
         }
+    }
+
+    private fun startVoiceInput(onVoiceRecognized: (String) -> Unit) {
+        voiceManager = VoiceManager(
+            context = this,
+            prefs = prefs,
+            onSpeechResult = onVoiceRecognized,
+            onError = { err -> Toast.makeText(this, err, Toast.LENGTH_SHORT).show() }
+        )
+        voiceManager.startListening()
     }
 
     private fun handleQuery(
@@ -105,11 +126,10 @@ class MainActivity : ComponentActivity() {
         coroutineScope.launch {
             val result = geminiRepo.getResponse(history, query)
             result.onSuccess { rawReply ->
-                // Check if reply contains an Action Tag to execute hardware
                 val finalMessage = if (rawReply.startsWith("[ACTION:")) {
                     val actionTag = rawReply.substringBefore("]") + "]"
                     val actionResult = deviceManager.executeAction(actionTag)
-                    actionResult ?: "Sir, action execute kar diya gaya hai."
+                    actionResult ?: "Sir, action execute kiya gaya."
                 } else {
                     rawReply
                 }
@@ -136,14 +156,19 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainNexAiScreen(
+fun MainMasterScreen(
     prefs: PreferencesManager,
+    deviceManager: DeviceManager,
+    chatHistoryManager: ChatHistoryManager,
     onVibrate: () -> Unit,
     onSendMessage: (String, List<ChatMessage>, (String?, String?) -> Unit) -> Unit,
     onStartVoice: ((String) -> Unit) -> Unit
 ) {
-    // Dynamic Time-Based Greeting (No Namaste)
-    val greetingText = remember {
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+
+    // Dynamic Time-Based Greeting
+    fun getDynamicGreeting(): String {
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
         val timeSalutation = when (hour) {
             in 5..11 -> "Good morning"
@@ -151,22 +176,31 @@ fun MainNexAiScreen(
             in 17..21 -> "Good evening"
             else -> "Hello"
         }
-        "$timeSalutation, Sir! Nex AI online hai. JARVIS protocols aur world knowledge ready hai. Boliye, kya command hai?"
+        return "$timeSalutation, ${prefs.ownerName}! Nex AI online hai. Chit-chat aur voice messaging ke liye taiyar hoon. Aaj kya naya sikhna ya discuss karna chahte hain?"
     }
 
-    val messages = remember {
-        mutableStateListOf(
-            ChatMessage(
-                sender = Sender.NEX,
-                text = greetingText
-            )
-        )
+    var sessionsList by remember { mutableStateOf(chatHistoryManager.getAllSessions()) }
+    var activeSession by remember {
+        val activeId = chatHistoryManager.getActiveSessionId()
+        val found = sessionsList.firstOrNull { it.id == activeId }
+        mutableStateOf(found ?: chatHistoryManager.createNewSession(getDynamicGreeting()))
     }
+
+    var currentTab by remember { mutableStateOf(0) } // 0 = Chat & Voice, 1 = Commander
     var inputText by remember { mutableStateOf("") }
     var isThinking by remember { mutableStateOf(false) }
+    var isContinuousListening by remember { mutableStateOf(prefs.isContinuousModeEnabled) }
     var showSettings by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
+
+    // Command Center Log
+    val commandLogs = remember {
+        mutableStateListOf(
+            "System initialized. Background protocols ready.",
+            "Hardware Sentinel monitoring battery & torch.",
+            "Say 'Torch on', 'Battery report', or 'Open WhatsApp'."
+        )
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -178,132 +212,453 @@ fun MainNexAiScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
+    // Continuous voice cycle runner
+    fun triggerVoiceCycle() {
+        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                drawerContainerColor = DeepCardNavy,
+                modifier = Modifier.width(300.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
+                ) {
+                    // Header
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        MiniArcReactor(isGlowing = isThinking)
+                        MiniArcReactor(isGlowing = false)
                         Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text("Nex AI", color = TextWhite, fontSize = 18.sp)
-                            Text("JARVIS Core Active", color = AccentCyan, fontSize = 11.sp)
+                        Text("Nex AI History", color = TextWhite, fontSize = 18.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // ➕ New Chat Button
+                    Button(
+                        onClick = {
+                            onVibrate()
+                            val newSess = chatHistoryManager.createNewSession(getDynamicGreeting())
+                            activeSession = newSess
+                            sessionsList = chatHistoryManager.getAllSessions()
+                            scope.launch { drawerState.close() }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentCyan),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "New Chat", tint = Color.Black)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("New Chat", color = Color.Black)
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Recent Conversations", color = TextMuted, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Saved Sessions List (Gemini Style)
+                    LazyColumn(modifier = Modifier.weight(1f)) {
+                        items(sessionsList) { session ->
+                            val isSelected = session.id == activeSession.id
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) SurfaceAccent else Color.Transparent)
+                                    .clickable {
+                                        onVibrate()
+                                        activeSession = session
+                                        chatHistoryManager.setActiveSessionId(session.id)
+                                        scope.launch { drawerState.close() }
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Chat,
+                                    contentDescription = null,
+                                    tint = if (isSelected) AccentCyan else TextMuted,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = session.title,
+                                    color = if (isSelected) TextWhite else TextMuted,
+                                    fontSize = 14.sp,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1
+                                )
+                                IconButton(
+                                    onClick = {
+                                        onVibrate()
+                                        chatHistoryManager.deleteSession(session.id)
+                                        sessionsList = chatHistoryManager.getAllSessions()
+                                        if (session.id == activeSession.id) {
+                                            activeSession = sessionsList.firstOrNull() ?: chatHistoryManager.createNewSession(getDynamicGreeting())
+                                        }
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFE57373), modifier = Modifier.size(16.dp))
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
                         }
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DeepCardNavy),
-                actions = {
-                    IconButton(onClick = {
-                        onVibrate()
-                        showSettings = true
-                    }) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = AccentCyan)
-                    }
-                }
-            )
-        },
-        containerColor = DarkBlueBackground
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            // Chat history list
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                state = listState
-            ) {
-                items(messages) { msg ->
-                    ChatBubble(message = msg)
+
+                    Divider(color = SurfaceAccent)
                     Spacer(modifier = Modifier.height(10.dp))
-                }
-                if (isThinking) {
-                    item {
-                        Text(
-                            text = "Nex is processing...",
-                            color = AccentCyan,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(start = 8.dp, bottom = 8.dp)
-                        )
+
+                    // Drawer Footer
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Voice Lock: ${if (prefs.isVoiceLockEnabled) "Active" else "Off"}", color = AccentCyan, fontSize = 11.sp)
+                        IconButton(onClick = {
+                            onVibrate()
+                            showSettings = true
+                            scope.launch { drawerState.close() }
+                        }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings", tint = AccentCyan)
+                        }
                     }
                 }
             }
-
-            // Input Bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(DeepCardNavy)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = {
-                        onVibrate()
-                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    ) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            onVibrate()
+                            scope.launch { drawerState.open() }
+                        }) {
+                            Icon(Icons.Default.Menu, contentDescription = "Drawer", tint = AccentCyan)
+                        }
+                    },
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            MiniArcReactor(isGlowing = isThinking || isContinuousListening)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text("Nex AI", color = TextWhite, fontSize = 18.sp)
+                                Text(
+                                    if (isContinuousListening) "Continuous Active" else "Sentinel Ready",
+                                    color = AccentCyan,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = DeepCardNavy),
+                    actions = {
+                        IconButton(onClick = {
+                            onVibrate()
+                            showSettings = true
+                        }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings", tint = AccentCyan)
+                        }
                     }
+                )
+            },
+            containerColor = DarkBlueBackground
+        ) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
+                // Two Dedicated Tabs
+                TabRow(
+                    selectedTabIndex = currentTab,
+                    containerColor = DeepCardNavy,
+                    contentColor = AccentCyan
                 ) {
-                    Icon(Icons.Default.Mic, contentDescription = "Voice Input", tint = AccentCyan)
+                    Tab(
+                        selected = currentTab == 0,
+                        onClick = {
+                            onVibrate()
+                            currentTab = 0
+                        },
+                        text = { Text("💬 Chat & Voice") },
+                        icon = { Icon(Icons.Default.Chat, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    )
+                    Tab(
+                        selected = currentTab == 1,
+                        onClick = {
+                            onVibrate()
+                            currentTab = 1
+                        },
+                        text = { Text("⚡ Commander") },
+                        icon = { Icon(Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    )
                 }
 
-                TextField(
-                    value = inputText,
-                    onValueChange = { inputText = it },
-                    placeholder = { Text("Command Nex AI...", color = TextMuted, fontSize = 13.sp) },
-                    modifier = Modifier.weight(1f),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        focusedTextColor = TextWhite,
-                        unfocusedTextColor = TextWhite
-                    ),
-                    maxLines = 4
-                )
-
-                IconButton(
-                    onClick = {
-                        val prompt = inputText.trim()
-                        if (prompt.isNotBlank() && !isThinking) {
-                            onVibrate()
-                            messages.add(ChatMessage(sender = Sender.USER, text = prompt))
-                            inputText = ""
-                            isThinking = true
-                            scope.launch { listState.animateScrollToItem(messages.size - 1) }
-
-                            onSendMessage(prompt, messages) { reply, error ->
-                                isThinking = false
-                                if (reply != null) {
-                                    messages.add(ChatMessage(sender = Sender.NEX, text = reply))
-                                } else {
-                                    messages.add(ChatMessage(sender = Sender.SYSTEM, text = "⚠️ $error"))
+                if (currentTab == 0) {
+                    // TAB 1: PURE CHAT & VOICE (Commands nahi aayenge)
+                    Column(modifier = Modifier.weight(1f)) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            state = listState
+                        ) {
+                            items(activeSession.messages) { msg ->
+                                ChatBubble(message = msg)
+                                Spacer(modifier = Modifier.height(10.dp))
+                            }
+                            if (isThinking) {
+                                item {
+                                    Text(
+                                        text = "Nex is formulating advice...",
+                                        color = AccentCyan,
+                                        fontSize = 12.sp,
+                                        modifier = Modifier.padding(start = 8.dp, bottom = 8.dp)
+                                    )
                                 }
-                                scope.launch { listState.animateScrollToItem(messages.size - 1) }
+                            }
+                        }
+
+                        // Chat Input Bar
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(DeepCardNavy)
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    onVibrate()
+                                    triggerVoiceCycle()
+                                }
+                            ) {
+                                Icon(Icons.Default.Mic, contentDescription = "Voice Input", tint = AccentCyan)
+                            }
+
+                            TextField(
+                                value = inputText,
+                                onValueChange = { inputText = it },
+                                placeholder = { Text("Chat with Nex AI...", color = TextMuted, fontSize = 13.sp) },
+                                modifier = Modifier.weight(1f),
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = Color.Transparent,
+                                    unfocusedContainerColor = Color.Transparent,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    focusedTextColor = TextWhite,
+                                    unfocusedTextColor = TextWhite
+                                ),
+                                maxLines = 4
+                            )
+
+                            IconButton(
+                                onClick = {
+                                    val prompt = inputText.trim()
+                                    if (prompt.isNotBlank() && !isThinking) {
+                                        onVibrate()
+                                        activeSession.messages.add(ChatMessage(sender = Sender.USER, text = prompt))
+                                        inputText = ""
+                                        isThinking = true
+                                        chatHistoryManager.saveSession(activeSession)
+                                        scope.launch { listState.animateScrollToItem(activeSession.messages.size - 1) }
+
+                                        onSendMessage(prompt, activeSession.messages) { reply, error ->
+                                            isThinking = false
+                                            if (reply != null) {
+                                                activeSession.messages.add(ChatMessage(sender = Sender.NEX, text = reply))
+                                                chatHistoryManager.saveSession(activeSession)
+
+                                                // Continuous mode auto-trigger
+                                                if (isContinuousListening) {
+                                                    val lower = prompt.lowercase()
+                                                    if (lower.contains("stop") || lower.contains("sleep") || lower.contains("bye") || lower.contains("band ho jao")) {
+                                                        isContinuousListening = false
+                                                    } else {
+                                                        scope.launch {
+                                                            delay(2800)
+                                                            triggerVoiceCycle()
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                activeSession.messages.add(ChatMessage(sender = Sender.SYSTEM, text = "⚠️ $error"))
+                                            }
+                                            scope.launch { listState.animateScrollToItem(activeSession.messages.size - 1) }
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.Send, contentDescription = "Send", tint = AccentCyan)
                             }
                         }
                     }
-                ) {
-                    Icon(Icons.Default.Send, contentDescription = "Send", tint = AccentCyan)
+                } else {
+                    // TAB 2: JARVIS COMMANDER (Direct hardware buttons + Command logs)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Text("Hardware Controls Dashboard", color = AccentCyan, fontSize = 14.sp)
+
+                        // Quick Hardware Action Grid
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            CommandActionCard(
+                                title = "Torch Toggle",
+                                icon = Icons.Default.FlashlightOn,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                onVibrate()
+                                val res = deviceManager.toggleTorch(true)
+                                commandLogs.add(0, res)
+                            }
+
+                            CommandActionCard(
+                                title = "Battery Check",
+                                icon = Icons.Default.BatteryChargingFull,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                onVibrate()
+                                val res = deviceManager.getBatteryReport()
+                                commandLogs.add(0, res)
+                            }
+                        }
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            CommandActionCard(
+                                title = "Max Volume",
+                                icon = Icons.Default.VolumeUp,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                onVibrate()
+                                val res = deviceManager.setMaxVolume()
+                                commandLogs.add(0, res)
+                            }
+
+                            CommandActionCard(
+                                title = "Camera Launch",
+                                icon = Icons.Default.CameraAlt,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                onVibrate()
+                                val res = deviceManager.openCamera()
+                                commandLogs.add(0, res)
+                            }
+                        }
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            CommandActionCard(
+                                title = "WhatsApp",
+                                icon = Icons.Default.Chat,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                onVibrate()
+                                val res = deviceManager.openApp("com.whatsapp", "WhatsApp")
+                                commandLogs.add(0, res)
+                            }
+
+                            CommandActionCard(
+                                title = "YouTube",
+                                icon = Icons.Default.PlayArrow,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                onVibrate()
+                                val res = deviceManager.openApp("com.google.android.youtube", "YouTube")
+                                commandLogs.add(0, res)
+                            }
+                        }
+
+                        // Background Sentinel Status Card
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = DeepCardNavy),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Off-Screen 'Nex' Sentinel", color = TextWhite, fontSize = 14.sp)
+                                    Text("Screen off me 'Nex' sun kar wake karega", color = TextMuted, fontSize = 11.sp)
+                                }
+                                Switch(
+                                    checked = prefs.isBackgroundWakeEnabled,
+                                    onCheckedChange = { enable ->
+                                        onVibrate()
+                                        prefs.isBackgroundWakeEnabled = enable
+                                        val res = deviceManager.toggleBackgroundSentinel(enable)
+                                        commandLogs.add(0, res)
+                                    }
+                                )
+                            }
+                        }
+
+                        Text("Commander Terminal Logs", color = AccentCyan, fontSize = 13.sp)
+
+                        // Logs List
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(DeepCardNavy)
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            commandLogs.take(8).forEach { log ->
+                                Text("⚡ $log", color = TextWhite, fontSize = 12.sp)
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
     if (showSettings) {
-        AdvancedGeminiSettingsDialog(
+        MasterSettingsDialog(
             prefs = prefs,
             onVibrate = onVibrate,
-            onClearHistory = {
-                messages.clear()
-                messages.add(ChatMessage(sender = Sender.NEX, text = "History cleared, Sir. Nex AI ready for new instructions."))
-            },
             onDismiss = { showSettings = false }
         )
+    }
+}
+
+@Composable
+fun CommandActionCard(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = modifier.clickable { onClick() },
+        colors = CardDefaults.cardColors(containerColor = DeepCardNavy),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(icon, contentDescription = title, tint = AccentCyan, modifier = Modifier.size(28.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(title, color = TextWhite, fontSize = 13.sp)
+        }
     }
 }
 
@@ -423,32 +778,32 @@ fun ChatBubble(message: ChatMessage) {
     }
 }
 
-// Gemini / ChatGPT Level Advanced Settings Screen
+// Master Settings Panel
 @Composable
-fun AdvancedGeminiSettingsDialog(
+fun MasterSettingsDialog(
     prefs: PreferencesManager,
     onVibrate: () -> Unit,
-    onClearHistory: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var selectedLanguage by remember { mutableStateOf(prefs.preferredLanguage) }
     var selectedVoice by remember { mutableStateOf(prefs.voiceStyle) }
     var selectedTone by remember { mutableStateOf(prefs.personalityTone) }
     var ttsEnabled by remember { mutableStateOf(prefs.isTtsEnabled) }
-    var hapticEnabled by remember { mutableStateOf(prefs.isHapticEnabled) }
+    var continuousEnabled by remember { mutableStateOf(prefs.isContinuousModeEnabled) }
+    var voiceLockEnabled by remember { mutableStateOf(prefs.isVoiceLockEnabled) }
 
     val languages = listOf("Hindi", "Hinglish", "English", "Urdu", "Bengali", "Punjabi")
     val voices = listOf("JARVIS Deep", "FRIDAY Female", "Classic Nex", "Fast Crisp", "Calm Soft", "Cyber Metallic")
-    val tones = listOf("JARVIS Tactical", "Friendly Buddy", "Short & Direct")
+    val tones = listOf("Friendly Buddy", "JARVIS Tactical", "Short & Direct")
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = DeepCardNavy,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Nex AI Settings", color = TextWhite, fontSize = 20.sp)
+                Text("Nex AI Master Controls", color = TextWhite, fontSize = 18.sp)
                 Spacer(modifier = Modifier.weight(1f))
-                Text("v2.5 Pro", color = AccentCyan, fontSize = 11.sp)
+                Text("v3.0 Ultra", color = AccentCyan, fontSize = 11.sp)
             }
         },
         text = {
@@ -456,11 +811,11 @@ fun AdvancedGeminiSettingsDialog(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // 1. Language Selector
-                Text("Response Language", color = AccentCyan, fontSize = 13.sp)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Language Selector
+                Text("Language", color = AccentCyan, fontSize = 13.sp)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     items(languages) { lang ->
                         FilterChip(
                             selected = selectedLanguage == lang,
@@ -481,17 +836,17 @@ fun AdvancedGeminiSettingsDialog(
 
                 Divider(color = SurfaceAccent)
 
-                // 2. 6 AI Voices Selector
-                Text("AI Voice Profile (6 Styles)", color = AccentCyan, fontSize = 13.sp)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(voices) { voice ->
+                // 6 Voices Selector
+                Text("Voice Profile", color = AccentCyan, fontSize = 13.sp)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(voices) { v ->
                         FilterChip(
-                            selected = selectedVoice == voice,
+                            selected = selectedVoice == v,
                             onClick = {
                                 onVibrate()
-                                selectedVoice = voice
+                                selectedVoice = v
                             },
-                            label = { Text(voice) },
+                            label = { Text(v) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = AccentCyan,
                                 selectedLabelColor = Color.Black,
@@ -504,17 +859,17 @@ fun AdvancedGeminiSettingsDialog(
 
                 Divider(color = SurfaceAccent)
 
-                // 3. AI Personality Tone
-                Text("Personality Protocol", color = AccentCyan, fontSize = 13.sp)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(tones) { tone ->
+                // Personality
+                Text("Personality Advisor", color = AccentCyan, fontSize = 13.sp)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(tones) { t ->
                         FilterChip(
-                            selected = selectedTone == tone,
+                            selected = selectedTone == t,
                             onClick = {
                                 onVibrate()
-                                selectedTone = tone
+                                selectedTone = t
                             },
-                            label = { Text(tone) },
+                            label = { Text(t) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = AccentCyan,
                                 selectedLabelColor = Color.Black,
@@ -527,13 +882,51 @@ fun AdvancedGeminiSettingsDialog(
 
                 Divider(color = SurfaceAccent)
 
-                // 4. Voice and Haptics Switches
+                // Continuous Listening Mode Switch
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Voice Spoken Feedback", color = TextWhite)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Continuous Mode", color = TextWhite, fontSize = 14.sp)
+                        Text("Bina ruke continuous baatein karein", color = TextMuted, fontSize = 11.sp)
+                    }
+                    Switch(
+                        checked = continuousEnabled,
+                        onCheckedChange = {
+                            onVibrate()
+                            continuousEnabled = it
+                        }
+                    )
+                }
+
+                // Voice Lock Security Switch
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Voice Lock (Sir Only)", color = TextWhite, fontSize = 14.sp)
+                        Text("Sirf Sir ki aawaz se command lega", color = TextMuted, fontSize = 11.sp)
+                    }
+                    Switch(
+                        checked = voiceLockEnabled,
+                        onCheckedChange = {
+                            onVibrate()
+                            voiceLockEnabled = it
+                        }
+                    )
+                }
+
+                // TTS Switch
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Spoken Audio Feedback", color = TextWhite)
                     Switch(
                         checked = ttsEnabled,
                         onCheckedChange = {
@@ -541,55 +934,6 @@ fun AdvancedGeminiSettingsDialog(
                             ttsEnabled = it
                         }
                     )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Haptic Touch Feedback", color = TextWhite)
-                    Switch(
-                        checked = hapticEnabled,
-                        onCheckedChange = {
-                            onVibrate()
-                            hapticEnabled = it
-                        }
-                    )
-                }
-
-                Divider(color = SurfaceAccent)
-
-                // 5. Clear Chat History Button
-                Button(
-                    onClick = {
-                        onVibrate()
-                        onClearHistory()
-                        onDismiss()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6B1D2F)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.Delete, contentDescription = "Clear Chat", tint = Color.White)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Clear Chat History", color = Color.White)
-                }
-
-                // 6. Zero API Key Shield Badge
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = DarkBlueBackground),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "🛡️ Zero API Key Mode: 100% Free Lifetime. Data is encrypted & never stored.",
-                            color = TextMuted,
-                            fontSize = 11.sp
-                        )
-                    }
                 }
             }
         },
@@ -601,7 +945,8 @@ fun AdvancedGeminiSettingsDialog(
                     prefs.voiceStyle = selectedVoice
                     prefs.personalityTone = selectedTone
                     prefs.isTtsEnabled = ttsEnabled
-                    prefs.isHapticEnabled = hapticEnabled
+                    prefs.isContinuousModeEnabled = continuousEnabled
+                    prefs.isVoiceLockEnabled = voiceLockEnabled
                     onDismiss()
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = AccentCyan)
@@ -611,7 +956,7 @@ fun AdvancedGeminiSettingsDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Close", color = TextWhite)
+                Text("Dismiss", color = TextWhite)
             }
         }
     )
