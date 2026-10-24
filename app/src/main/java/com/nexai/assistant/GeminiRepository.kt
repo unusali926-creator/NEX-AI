@@ -4,6 +4,11 @@ import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 
 class GeminiRepository(private val prefs: PreferencesManager) {
 
@@ -26,15 +31,38 @@ class GeminiRepository(private val prefs: PreferencesManager) {
     suspend fun getResponse(history: List<ChatMessage>, userPrompt: String): Result<String> {
         return withContext(Dispatchers.IO) {
             try {
-                if (prefs.apiKey.isBlank()) {
-                    return@withContext Result.failure(Exception("Gemini API Key missing. Please set it in Settings (⚙)."))
+                // 1. Agar user ne Settings me Gemini Key daali hai to Gemini use karo
+                if (prefs.apiKey.isNotBlank()) {
+                    val model = getModel()
+                    val response = model.generateContent(userPrompt)
+                    val reply = response.text ?: "Kuch samajh nahi aaya, kripya dobara puchiye."
+                    return@withContext Result.success(reply)
                 }
-                val model = getModel()
-                val response = model.generateContent(userPrompt)
-                val reply = response.text ?: "I understood your question, but could not produce a response."
-                Result.success(reply)
+
+                // 2. Agar koi API Key NAHI hai, to Free Open-AI Engine use karo (Zero Key Required)
+                val systemPrompt = "You are Nex AI, a helpful Indian voice assistant. Answer in Hindi, Hinglish, or English. Be polite, concise, and smart. Preference: ${prefs.preferredLanguage}."
+                val fullQuery = "$systemPrompt\nUser: $userPrompt"
+                val encodedPrompt = URLEncoder.encode(fullQuery, "UTF-8")
+                val url = URL("https://text.pollinations.ai/$encodedPrompt")
+
+                val connection = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 15000
+                    readTimeout = 15000
+                    setRequestProperty("User-Agent", "NexAI-App")
+                }
+
+                if (connection.responseCode == 200) {
+                    val reader = BufferedReader(InputStreamReader(connection.inputStream))
+                    val reply = reader.readText().trim()
+                    reader.close()
+                    Result.success(reply)
+                } else {
+                    Result.success("Namaste! Main Nex AI hoon. Aap mujhse Hindi ya English me koi bhi sawal pooch sakte hain.")
+                }
             } catch (e: Exception) {
-                Result.failure(e)
+                // Network slow hone par friendly fallback response
+                Result.success("Namaste! Internet connection thoda slow hai, kripya dobara boliye ya type kijiye.")
             }
         }
     }
