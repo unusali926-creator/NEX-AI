@@ -7,7 +7,17 @@ class PreferencesManager(context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("nex_ai_prefs", Context.MODE_PRIVATE)
 
-    // Language Preference: Hindi, Hinglish, English, Urdu, Bengali, Punjabi
+    // Master Core State: Active (All-time listening & companion) vs Inactive (Sleeping)
+    var isMasterActive: Boolean
+        get() = prefs.getBoolean("master_core_active", false)
+        set(value) = prefs.edit().putBoolean("master_core_active", value).apply()
+
+    // Continuous Active Conversation Loop (Keep listening until told to stop)
+    var isContinuousActive: Boolean
+        get() = prefs.getBoolean("continuous_active", true)
+        set(value) = prefs.edit().putBoolean("continuous_active", value).apply()
+
+    // Preferred Language: Hindi, Hinglish, English, Urdu, Bengali, Punjabi
     var preferredLanguage: String
         get() = prefs.getString("preferred_language", "Hinglish") ?: "Hinglish"
         set(value) = prefs.edit().putString("preferred_language", value).apply()
@@ -27,27 +37,12 @@ class PreferencesManager(context: Context) {
         get() = prefs.getBoolean("tts_enabled", true)
         set(value) = prefs.edit().putBoolean("tts_enabled", value).apply()
 
-    // Haptic / Vibration Feedback
+    // Haptic Vibration Feedback
     var isHapticEnabled: Boolean
         get() = prefs.getBoolean("haptic_enabled", true)
         set(value) = prefs.edit().putBoolean("haptic_enabled", value).apply()
 
-    // Continuous Active Conversation Loop (Until user says 'Stop' or 'Sleep')
-    var isContinuousModeEnabled: Boolean
-        get() = prefs.getBoolean("continuous_mode_enabled", false)
-        set(value) = prefs.edit().putBoolean("continuous_mode_enabled", value).apply()
-
-    // Background Screen-Off Wake-Up ("Nex" Sentinel Service)
-    var isBackgroundWakeEnabled: Boolean
-        get() = prefs.getBoolean("background_wake_enabled", false)
-        set(value) = prefs.edit().putBoolean("background_wake_enabled", value).apply()
-
-    // Voice Lock Security: Only accept commands from Sir
-    var isVoiceLockEnabled: Boolean
-        get() = prefs.getBoolean("voice_lock_enabled", false)
-        set(value) = prefs.edit().putBoolean("voice_lock_enabled", value).apply()
-
-    // Registered Speaker Name / Title
+    // Owner Name (Always 'Sir' or customizable)
     var ownerName: String
         get() = prefs.getString("owner_name", "Sir") ?: "Sir"
         set(value) = prefs.edit().putString("owner_name", value).apply()
