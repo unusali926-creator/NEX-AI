@@ -1,4 +1,4 @@
-name: Build Nex AI (Auto-Fix Wrapper)
+name: Nex AI Deep Scanner & Builder
 
 on:
   push:
@@ -6,54 +6,88 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  scan-and-build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Code
+    - name: 1. Code Checkout
       uses: actions/checkout@v4
 
-    - name: Set up JDK 17
+    - name: 2. Setup Java 17
       uses: actions/setup-java@v4
       with:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Setup Gradle Environment
+    - name: 3. Setup Gradle
       uses: gradle/actions/setup-gradle@v3
 
-    - name: Auto-Generate Missing Gradle Wrapper
+    - name: 4. Check & Generate Gradle Wrapper
       run: |
         if [ ! -f "gradlew" ]; then
           gradle wrapper
         fi
         chmod +x gradlew
 
-    - name: Run Build
+    - name: 5. Deep Scan & Assemble Debug
       run: |
         set +e
-        ./gradlew assembleDebug --stacktrace > build_output.log 2>&1
-        BUILD_STATUS=$?
+        ./gradlew assembleDebug --stacktrace > full_build.log 2>&1
+        STATUS=$?
 
-        if [ $BUILD_STATUS -ne 0 ]; then
-          echo "### ❌ Asli Problem Yahan Hai:" >> $GITHUB_STEP_SUMMARY
-          echo '```text' >> $GITHUB_STEP_SUMMARY
-          
-          # Exact failure reason (What went wrong ke baad ki 35 lines)
-          grep -A 35 "* What went wrong:" build_output.log >> $GITHUB_STEP_SUMMARY
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "--- [Agar Kotlin me error hai toh yahan aayega] ---" >> $GITHUB_STEP_SUMMARY
-          grep -E "^e: " build_output.log | head -n 30 >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          exit 1
+        if [ $STATUS -eq 0 ]; then
+          echo "## 🎉 BUILD SUCCESSFUL! APK TAYYAR HAI!" >> $GITHUB_STEP_SUMMARY
+          echo "Neeche Artifacts section se **NexAI-Debug-APK** download kar lo." >> $GITHUB_STEP_SUMMARY
         else
-          echo "### 🎉 Mubarak ho! Build Success ho gaya! APK Ban Gaya!" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚨 NEX AI X-RAY REPORT: EXACT PROBLEM FOUND" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # 1. Kotlin Code Error Scan (File aur Line Number nikalna)
+          KOTLIN_ERR=$(grep -E "^e: " full_build.log || true)
+          if [ -n "$KOTLIN_ERR" ]; then
+            echo "### 🔴 1. KOTLIN CODE ERRORS (File Name & Line Number):" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            echo "$KOTLIN_ERR" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # 2. XML / Resource Error Scan
+          AAPT_ERR=$(grep -i "AAPT: error:" full_build.log || true)
+          if [ -n "$AAPT_ERR" ]; then
+            echo "### 🟠 2. XML / RESOURCE ERRORS:" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            echo "$AAPT_ERR" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # 3. Gradle 'What Went Wrong' Block
+          echo "### 🟡 3. EXACT ROOT CAUSE (Gradle Report):" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          sed -n '/\* What went wrong:/,/\* Try:/p' full_build.log | head -n 35 >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          # 4. Fallback Log agar upar kuch match na ho
+          if [ -z "$KOTLIN_ERR" ] && [ -z "$AAPT_ERR" ]; then
+            echo "### ⚪ 4. RAW LOG TAIL (Aakhiri 35 Lines):" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            tail -n 35 full_build.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+          exit 1
         fi
 
-    - name: Upload APK on Success
+    - name: 6. Upload APK on Success
       if: success()
       uses: actions/upload-artifact@v4
       with:
         name: NexAI-Debug-APK
         path: "**/build/outputs/apk/debug/*.apk"
+
+    - name: 7. Save Full Log File
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: Complete-Build-Log
+        path: full_build.log
+        
