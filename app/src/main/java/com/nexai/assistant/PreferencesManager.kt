@@ -12,17 +12,17 @@ class PreferencesManager(context: Context) {
         get() = prefs.getString("preferred_language", "Hinglish") ?: "Hinglish"
         set(value) = prefs.edit().putString("preferred_language", value).apply()
 
-    // 6 Voice Presets: JARVIS Deep, FRIDAY Female, Classic Nex, Fast Crisp, Calm Soft, Cyber Metallic
+    // 6 Voice Presets
     var voiceStyle: String
         get() = prefs.getString("voice_style", "JARVIS Deep") ?: "JARVIS Deep"
         set(value) = prefs.edit().putString("voice_style", value).apply()
 
-    // AI Personality Tone: JARVIS Tactical, Friendly Buddy, Short & Direct
+    // AI Personality Tone
     var personalityTone: String
-        get() = prefs.getString("personality_tone", "JARVIS Tactical") ?: "JARVIS Tactical"
+        get() = prefs.getString("personality_tone", "Friendly Buddy") ?: "Friendly Buddy"
         set(value) = prefs.edit().putString("personality_tone", value).apply()
 
-    // Spoken Voice Toggle
+    // Spoken Audio Toggle
     var isTtsEnabled: Boolean
         get() = prefs.getBoolean("tts_enabled", true)
         set(value) = prefs.edit().putBoolean("tts_enabled", value).apply()
@@ -31,4 +31,24 @@ class PreferencesManager(context: Context) {
     var isHapticEnabled: Boolean
         get() = prefs.getBoolean("haptic_enabled", true)
         set(value) = prefs.edit().putBoolean("haptic_enabled", value).apply()
+
+    // Continuous Active Conversation Loop (Until user says 'Stop' or 'Sleep')
+    var isContinuousModeEnabled: Boolean
+        get() = prefs.getBoolean("continuous_mode_enabled", false)
+        set(value) = prefs.edit().putBoolean("continuous_mode_enabled", value).apply()
+
+    // Background Screen-Off Wake-Up ("Nex" Sentinel Service)
+    var isBackgroundWakeEnabled: Boolean
+        get() = prefs.getBoolean("background_wake_enabled", false)
+        set(value) = prefs.edit().putBoolean("background_wake_enabled", value).apply()
+
+    // Voice Lock Security: Only accept commands from Sir
+    var isVoiceLockEnabled: Boolean
+        get() = prefs.getBoolean("voice_lock_enabled", false)
+        set(value) = prefs.edit().putBoolean("voice_lock_enabled", value).apply()
+
+    // Registered Speaker Name / Title
+    var ownerName: String
+        get() = prefs.getString("owner_name", "Sir") ?: "Sir"
+        set(value) = prefs.edit().putString("owner_name", value).apply()
 }
