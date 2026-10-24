@@ -38,7 +38,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -71,7 +70,6 @@ class MainActivity : ComponentActivity() {
     private var activeVoiceQueryHandler: ((String) -> Unit)? = null
 
     var isBottomHudActive by mutableStateOf(false)
-    var hudSpeakingState by mutableStateOf(false)
     var hudText by mutableStateOf("Listening to Sir...")
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,6 +80,7 @@ class MainActivity : ComponentActivity() {
         chatHistoryManager = ChatHistoryManager(this)
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
 
+        // Pre-initialize HD Studio Voice Engine immediately
         voiceManager = VoiceManager(
             context = this,
             prefs = prefs,
@@ -98,12 +97,11 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             NexTheme {
-                MainMasterScreen(
+                MainVoiceCockpitScreen(
                     prefs = prefs,
                     voiceManager = voiceManager,
                     chatHistoryManager = chatHistoryManager,
                     isBottomHudActive = isBottomHudActive,
-                    hudSpeakingState = hudSpeakingState,
                     hudText = hudText,
                     onCloseHud = { isBottomHudActive = false },
                     onVibrate = { triggerHaptic() },
@@ -143,28 +141,28 @@ class MainActivity : ComponentActivity() {
         triggerHaptic()
 
         if (makeActive) {
-            // Check microphone permission safely before starting any background service
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                 deviceManager.toggleBackgroundSentinel(true)
             }
             voiceManager.speak("Hello Sir! Nex is online and listening.")
-            Toast.makeText(this, "NEX CORE: ACTIVE", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "NEX: ACTIVE (Voice Only)", Toast.LENGTH_SHORT).show()
         } else {
             deviceManager.toggleBackgroundSentinel(false)
-            voiceManager.speak("Nex entering standby mode, Sir.")
-            Toast.makeText(this, "NEX CORE: STANDBY", Toast.LENGTH_SHORT).show()
+            voiceManager.speak("Nex entering standby, Sir.")
+            Toast.makeText(this, "NEX: STANDBY", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun triggerBottomHudCycle() {
         isBottomHudActive = true
-        hudSpeakingState = false
-        hudText = "Listening to ${prefs.ownerName}..."
+        hudText = "Listening to Sir..."
         startListeningSafe()
     }
 
     fun startListeningSafe() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            hudText = "Listening to Sir..."
+            isBottomHudActive = true
             voiceManager.startListening()
         }
     }
@@ -196,16 +194,17 @@ class MainActivity : ComponentActivity() {
                 val finalMessage = when {
                     rawReply.startsWith("[ACTION:DEACTIVATE_CORE]") -> {
                         executeToggleCore(false)
-                        "Nex deactivated, Sir. Call me anytime."
+                        "Deactivating systems, Sir."
                     }
                     rawReply.startsWith("[ACTION:") -> {
                         val actionTag = rawReply.substringBefore("]") + "]"
                         val actionResult = deviceManager.executeAction(actionTag)
-                        actionResult ?: "Action completed, Sir."
+                        actionResult ?: "Command executed, Sir."
                     }
                     else -> rawReply
                 }
 
+                hudText = finalMessage
                 if (prefs.isTtsEnabled) {
                     voiceManager.speak(finalMessage)
                 }
@@ -224,12 +223,11 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainMasterScreen(
+fun MainVoiceCockpitScreen(
     prefs: PreferencesManager,
     voiceManager: VoiceManager,
     chatHistoryManager: ChatHistoryManager,
     isBottomHudActive: Boolean,
-    hudSpeakingState: Boolean,
     hudText: String,
     onCloseHud: () -> Unit,
     onVibrate: () -> Unit,
@@ -252,7 +250,7 @@ fun MainMasterScreen(
             in 17..21 -> "Good evening"
             else -> "Hello"
         }
-        return "$timeSalutation, ${prefs.ownerName}! Nex AI online hai. Center button dabakar activate karein ya mic se baat karein."
+        return "$timeSalutation, ${prefs.ownerName}! Nex Voice Cockpit ready. Tap center Arc button to speak or command."
     }
 
     var sessionsList by remember { mutableStateOf(chatHistoryManager.getAllSessions()) }
@@ -262,28 +260,15 @@ fun MainMasterScreen(
         mutableStateOf(found ?: chatHistoryManager.createNewSession(getDynamicGreeting()))
     }
 
-    var inputText by remember { mutableStateOf("") }
     var isThinking by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            isMasterActive = true
-            onToggleMasterActive(true)
-        } else {
-            Toast.makeText(context, "Microphone permission required for Nex AI", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    fun submitMessage(prompt: String) {
+    fun submitVoiceQuery(prompt: String) {
         val cleanPrompt = prompt.trim()
         if (cleanPrompt.isNotBlank() && !isThinking) {
             onVibrate()
             activeSession.messages.add(ChatMessage(sender = Sender.USER, text = cleanPrompt))
-            inputText = ""
             isThinking = true
             chatHistoryManager.saveSession(activeSession)
             scope.launch { listState.animateScrollToItem(activeSession.messages.size - 1) }
@@ -303,7 +288,19 @@ fun MainMasterScreen(
 
     LaunchedEffect(Unit) {
         onBindVoiceHandler { recognizedSpeech ->
-            submitMessage(recognizedSpeech)
+            submitVoiceQuery(recognizedSpeech)
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            isMasterActive = true
+            onToggleMasterActive(true)
+            onStartVoiceListening()
+        } else {
+            Toast.makeText(context, "Microphone permission is required for Voice Commands", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -320,9 +317,9 @@ fun MainMasterScreen(
                         .padding(16.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        BigCircularArcReactor(isGlowing = isMasterActive, sizeDp = 42)
+                        BigCircularArcReactor(isGlowing = isMasterActive, sizeDp = 40)
                         Spacer(modifier = Modifier.width(10.dp))
-                        Text("Nex AI History", color = TextWhite, fontSize = 18.sp)
+                        Text("Nex Voice Sessions", color = TextWhite, fontSize = 18.sp)
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -339,13 +336,13 @@ fun MainMasterScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = "New Chat", tint = Color.Black)
+                        Icon(Icons.Default.Add, contentDescription = "New Voice Session", tint = Color.Black)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("New Chat", color = Color.Black)
+                        Text("New Voice Session", color = Color.Black)
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("Saved Conversations", color = TextMuted, fontSize = 12.sp)
+                    Text("Session Transcripts", color = TextMuted, fontSize = 12.sp)
                     Spacer(modifier = Modifier.height(8.dp))
 
                     LazyColumn(modifier = Modifier.weight(1f)) {
@@ -395,7 +392,6 @@ fun MainMasterScreen(
                     Divider(color = SurfaceAccent)
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Settings Button Inside Drawer (Top-Right se hata diya gaya)
                     Button(
                         onClick = {
                             onVibrate()
@@ -407,7 +403,7 @@ fun MainMasterScreen(
                     ) {
                         Icon(Icons.Default.Settings, contentDescription = null, tint = AccentCyan)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("App Settings & Voices", color = TextWhite)
+                        Text("Cockpit Settings & Voice", color = TextWhite)
                     }
                 }
             }
@@ -417,7 +413,6 @@ fun MainMasterScreen(
             Scaffold(
                 topBar = {
                     TopAppBar(
-                        // Left side me Direct New Chat & History Drawer Action
                         navigationIcon = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(onClick = {
@@ -432,15 +427,14 @@ fun MainMasterScreen(
                                     activeSession = newSess
                                     sessionsList = chatHistoryManager.getAllSessions()
                                 }) {
-                                    Icon(Icons.Default.Add, contentDescription = "New Chat", tint = AccentCyan)
+                                    Icon(Icons.Default.Add, contentDescription = "New Session", tint = AccentCyan)
                                 }
                             }
                         },
                         title = {
-                            Text("Nex AI", color = TextWhite, fontSize = 18.sp)
+                            Text("Nex Voice Cockpit", color = TextWhite, fontSize = 18.sp)
                         },
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = DeepCardNavy),
-                        // Right side setting icon removed as requested!
                         actions = {}
                     )
                 },
@@ -451,11 +445,11 @@ fun MainMasterScreen(
                         .fillMaxSize()
                         .padding(innerPadding)
                 ) {
-                    // CENTER GOL (CIRCULAR) ARC REACTOR BUTTON
+                    // CENTER GIANT VOICE ARC REACTOR CORE BUTTON
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 12.dp),
+                            .padding(vertical = 16.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(
@@ -463,34 +457,26 @@ fun MainMasterScreen(
                             modifier = Modifier
                                 .clickable {
                                     onVibrate()
-                                    if (!isMasterActive) {
-                                        // Check permission safely before activating
-                                        if (ContextCompat.checkSelfPermission(
-                                                context,
-                                                Manifest.permission.RECORD_AUDIO
-                                            ) == PackageManager.PERMISSION_GRANTED
-                                        ) {
+                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                        if (!isMasterActive) {
                                             isMasterActive = true
                                             onToggleMasterActive(true)
-                                        } else {
-                                            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                         }
+                                        onStartVoiceListening()
                                     } else {
-                                        isMasterActive = false
-                                        onToggleMasterActive(false)
+                                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                     }
                                 }
-                                .padding(8.dp)
+                                .padding(12.dp)
                         ) {
-                            // Large Circular Glowing Arc Reactor Button
-                            BigCircularArcReactor(isGlowing = isMasterActive, sizeDp = 90)
+                            BigCircularArcReactor(isGlowing = isMasterActive || isThinking, sizeDp = 110)
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
 
                             Text(
-                                text = if (isMasterActive) "NEX ACTIVE (ONLINE)" else "TAP TO ACTIVATE NEX",
+                                text = if (isThinking) "NEX COMPUTING..." else if (isMasterActive) "TAP TO SPEAK COMMAND" else "TAP CORE TO ACTIVATE",
                                 color = if (isMasterActive) AccentCyan else TextMuted,
-                                fontSize = 13.sp,
+                                fontSize = 14.sp,
                                 letterSpacing = 1.sp
                             )
                         }
@@ -514,7 +500,7 @@ fun MainMasterScreen(
                             Icon(Icons.Default.Notifications, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                "Notification Access (Poochne ke liye: 'Kaun message kiya?')",
+                                "Voice Notification Sync ('Kaun message kiya?')",
                                 color = TextWhite,
                                 fontSize = 11.sp,
                                 modifier = Modifier.weight(1f)
@@ -522,90 +508,59 @@ fun MainMasterScreen(
                         }
                     }
 
-                    // Pure Chat List
+                    // Live Voice Transcripts List
                     LazyColumn(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
                         state = listState
                     ) {
                         items(activeSession.messages) { msg ->
                             ChatBubble(message = msg)
                             Spacer(modifier = Modifier.height(10.dp))
                         }
-                        if (isThinking) {
-                            item {
-                                Text(
-                                    text = "Nex AI is computing & speaking...",
-                                    color = AccentCyan,
-                                    fontSize = 12.sp,
-                                    modifier = Modifier.padding(start = 8.dp, bottom = 8.dp)
-                                )
-                            }
-                        }
                     }
 
-                    // Input Bar
-                    Row(
+                    // BOTTOM 100% VOICE COCKPIT BAR (TEXT FIELD COMPLETELY REMOVED!)
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(DeepCardNavy)
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(vertical = 14.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        IconButton(
-                            onClick = {
-                                onVibrate()
-                                if (ContextCompat.checkSelfPermission(
-                                        context,
-                                        Manifest.permission.RECORD_AUDIO
-                                    ) == PackageManager.PERMISSION_GRANTED
-                                ) {
-                                    onStartVoiceListening()
-                                } else {
-                                    permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(30.dp))
+                                .background(AccentCyan)
+                                .clickable {
+                                    onVibrate()
+                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                        onStartVoiceListening()
+                                    } else {
+                                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    }
                                 }
-                            }
+                                .padding(horizontal = 24.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Mic, contentDescription = "Voice Input", tint = AccentCyan)
-                        }
-
-                        TextField(
-                            value = inputText,
-                            onValueChange = { inputText = it },
-                            placeholder = { Text("Command Nex (or ask 'Kaun message kiya?')...", color = TextMuted, fontSize = 12.sp) },
-                            modifier = Modifier.weight(1f),
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent,
-                                focusedTextColor = TextWhite,
-                                unfocusedTextColor = TextWhite
-                            ),
-                            maxLines = 4
-                        )
-
-                        IconButton(
-                            onClick = {
-                                submitMessage(inputText)
-                            }
-                        ) {
-                            Icon(Icons.Default.Send, contentDescription = "Send", tint = AccentCyan)
+                            Icon(Icons.Default.Mic, contentDescription = "Voice Input", tint = Color.Black, modifier = Modifier.size(24.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("HOLD OR TAP TO TALK", color = Color.Black, fontSize = 14.sp)
                         }
                     }
                 }
             }
 
-            // FLOATING BOTTOM-CENTER HUD INTERFACE
+            // FLOATING BOTTOM-CENTER HUD INTERFACE (During Live Speech)
             AnimatedVisibility(
                 visible = isBottomHudActive,
                 enter = slideInVertically(initialOffsetY = { it }),
                 exit = slideOutVertically(targetOffsetY = { it }),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 20.dp)
+                    .padding(bottom = 70.dp)
             ) {
                 Card(
                     modifier = Modifier
@@ -617,7 +572,7 @@ fun MainMasterScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(18.dp),
+                            .padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Row(
@@ -625,17 +580,17 @@ fun MainMasterScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("NEX HUD CORE", color = AccentCyan, fontSize = 11.sp)
-                            IconButton(onClick = onCloseHud, modifier = Modifier.size(24.dp)) {
+                            Text("NEX LIVE HUD", color = AccentCyan, fontSize = 11.sp)
+                            IconButton(onClick = onCloseHud, modifier = Modifier.size(22.dp)) {
                                 Icon(Icons.Default.Close, contentDescription = "Close", tint = TextMuted)
                             }
                         }
 
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        BigCircularArcReactor(isGlowing = true, sizeDp = 44)
+
                         Spacer(modifier = Modifier.height(8.dp))
-
-                        BigCircularArcReactor(isGlowing = true, sizeDp = 48)
-
-                        Spacer(modifier = Modifier.height(10.dp))
 
                         Text(
                             text = hudText,
@@ -668,7 +623,7 @@ fun BigCircularArcReactor(isGlowing: Boolean, sizeDp: Int) {
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = if (isGlowing) 2500 else 7000, easing = LinearEasing)
+            animation = tween(durationMillis = if (isGlowing) 2200 else 6500, easing = LinearEasing)
         ),
         label = "Rotation"
     )
@@ -677,7 +632,7 @@ fun BigCircularArcReactor(isGlowing: Boolean, sizeDp: Int) {
         initialValue = 0.88f,
         targetValue = 1.12f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = if (isGlowing) 450 else 1600, easing = FastOutSlowInEasing),
+            animation = tween(durationMillis = if (isGlowing) 400 else 1500, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "Pulse"
@@ -693,7 +648,6 @@ fun BigCircularArcReactor(isGlowing: Boolean, sizeDp: Int) {
             val center = Offset(size.width / 2, size.height / 2)
             val outerRadius = size.minDimension / 2 - 2
 
-            // Glowing Outer Ring
             drawCircle(
                 color = if (isGlowing) Color(0xFF00F5D4) else Color(0xFF3A506B),
                 radius = outerRadius,
@@ -701,7 +655,6 @@ fun BigCircularArcReactor(isGlowing: Boolean, sizeDp: Int) {
                 style = Stroke(width = 3.dp.toPx())
             )
 
-            // Inner Rotating Segments
             rotate(rotation, center) {
                 drawCircle(
                     color = if (isGlowing) Color(0xFF5BC0BE) else Color(0xFF1C2541),
@@ -729,7 +682,6 @@ fun BigCircularArcReactor(isGlowing: Boolean, sizeDp: Int) {
                 )
             }
 
-            // Pulsing Center Core
             drawCircle(
                 color = if (isGlowing) Color.White else Color(0xFF5BC0BE),
                 radius = (outerRadius * 0.30f) * pulseScale,
@@ -778,7 +730,6 @@ fun ChatBubble(message: ChatMessage) {
     }
 }
 
-// Improved Settings Panel with Live Voice Preview
 @Composable
 fun MasterSettingsDialog(
     prefs: PreferencesManager,
@@ -802,7 +753,7 @@ fun MasterSettingsDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Nex Settings & Voices", color = TextWhite, fontSize = 18.sp)
                 Spacer(modifier = Modifier.weight(1f))
-                Text("v4.0 Pro", color = AccentCyan, fontSize = 11.sp)
+                Text("v4.5 Voice", color = AccentCyan, fontSize = 11.sp)
             }
         },
         text = {
@@ -812,8 +763,7 @@ fun MasterSettingsDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Voice Selector with LIVE SOUND PREVIEW
-                Text("Select Voice Profile (Tap to hear sample)", color = AccentCyan, fontSize = 13.sp)
+                Text("Voice Profiles (Live Sample Audio)", color = AccentCyan, fontSize = 13.sp)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     items(voices) { v ->
                         FilterChip(
@@ -822,8 +772,7 @@ fun MasterSettingsDialog(
                                 onVibrate()
                                 selectedVoice = v
                                 prefs.voiceStyle = v
-                                // Immediately speak preview sample so user hears the voice!
-                                voiceManager.speak("Hello Sir, this is $v voice profile.")
+                                voiceManager.speak("Online, Sir. This is $v profile.")
                             },
                             label = { Text(v) },
                             colors = FilterChipDefaults.filterChipColors(
