@@ -5,6 +5,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Hands-Free Call Answering & Control Permissions -->
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
     <!-- All-Time Background & Wake-Up Permissions -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
@@ -15,11 +20,14 @@
 
     <!-- Hardware Controls -->
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
-    <!-- App launch queries -->
+    <!-- Universal App Discovery (Phone ke saare apps scan karne ke liye) -->
     <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+        </intent>
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
@@ -30,9 +38,6 @@
         <intent>
             <action android:name="android.intent.action.DIAL" />
         </intent>
-        <package android:name="com.whatsapp" />
-        <package android:name="com.google.android.youtube" />
-        <package android:name="com.instagram.android" />
     </queries>
 
     <application
@@ -61,7 +66,7 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
-        <!-- Notification Listener Service (Kaun Message Kiya Read Karne Ke Liye) -->
+        <!-- Notification Listener Service (Messages & Notifications Read Karne Ke Liye) -->
         <service
             android:name=".NexNotificationListenerService"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
