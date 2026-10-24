@@ -95,17 +95,26 @@ class VoiceManager(
 
     // MainActivity ke 0-parameter call ke liye
     fun startListening() {
-        startListening(
-            onResult = { result -> onSpeechResult?.invoke(result) },
-            onError = { err -> onError?.invoke(err) }
+        startListeningInternal(
+            { result: String -> onSpeechResult?.invoke(result) },
+            { err: String -> onError?.invoke(err) }
         )
     }
 
+    // 1-parameter call ke liye
     fun startListening(onResult: (String) -> Unit) {
-        startListening(onResult, onError)
+        startListeningInternal(onResult, onError)
     }
 
+    // 2-parameters call ke liye
     fun startListening(
+        onResult: (String) -> Unit,
+        onErrorCallback: ((String) -> Unit)?
+    ) {
+        startListeningInternal(onResult, onErrorCallback)
+    }
+
+    private fun startListeningInternal(
         onResult: (String) -> Unit,
         onErrorCallback: ((String) -> Unit)?
     ) {
@@ -182,7 +191,6 @@ class VoiceManager(
         }
     }
 
-    // MainActivity ke voiceManager.stop() ke liye
     fun stop() {
         stopListening()
     }
