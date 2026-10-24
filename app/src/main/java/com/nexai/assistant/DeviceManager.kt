@@ -7,6 +7,9 @@ import android.media.AudioManager
 import android.os.BatteryManager
 import android.os.Build
 import android.provider.MediaStore
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class DeviceManager(private val context: Context) {
 
@@ -34,33 +37,41 @@ class DeviceManager(private val context: Context) {
     fun toggleBackgroundSentinel(): Boolean = toggleBackgroundSentinel(true)
 
     fun executeAction(actionTag: String?): String? {
-        if (actionTag == null) return null actionTag == "[ACTION:SLEEP_MODE]" -> {
+        if (actionTag == null) return null
+
+        return when (actionTag) {
+            "[ACTION:SLEEP_MODE]" -> {
                 toggleBackgroundSentinel(false)
                 "Core systems powered down. Entering sleep mode, Sir."
             }
-
-        return when {
-            actionTag == "[ACTION:FLASHLIGHT_ON]" -> {
+            "[ACTION:READ_NOTIFICATION]" -> {
+                NexNotificationListenerService.getLatestNotificationReport()
+            }
+            "[ACTION:TIME]" -> {
+                val currentTime = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
+                "Sir, abhi theek $currentTime hue hain."
+            }
+            "[ACTION:FLASHLIGHT_ON]" -> {
                 setFlashlight(true)
                 "Flashlight activated, Sir."
             }
-            actionTag == "[ACTION:FLASHLIGHT_OFF]" -> {
+            "[ACTION:FLASHLIGHT_OFF]" -> {
                 setFlashlight(false)
                 "Flashlight deactivated, Sir."
             }
-            actionTag == "[ACTION:BATTERY]" -> {
+            "[ACTION:BATTERY]" -> {
                 val level = getBatteryPercentage()
                 "Sir, battery is currently at $level percent."
             }
-            actionTag == "[ACTION:OPEN_WHATSAPP]" -> {
+            "[ACTION:OPEN_WHATSAPP]" -> {
                 launchApp("com.whatsapp")
                 "Opening WhatsApp, Sir."
             }
-            actionTag == "[ACTION:OPEN_YOUTUBE]" -> {
+            "[ACTION:OPEN_YOUTUBE]" -> {
                 launchApp("com.google.android.youtube")
                 "Opening YouTube, Sir."
             }
-            actionTag == "[ACTION:OPEN_CAMERA]" -> {
+            "[ACTION:OPEN_CAMERA]" -> {
                 openCamera()
                 "Camera active, Sir."
             }
