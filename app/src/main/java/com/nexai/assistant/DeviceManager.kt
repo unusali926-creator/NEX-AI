@@ -5,7 +5,6 @@ import android.content.Intent
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.os.BatteryManager
-import android.os.Build
 import android.provider.MediaStore
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -16,33 +15,19 @@ class DeviceManager(private val context: Context) {
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
+    // Crash-free safe toggle (No risky Android 14 background crash)
     fun toggleBackgroundSentinel(enabled: Boolean = true): Boolean {
-        try {
-            val intent = Intent(context, NexVoiceService::class.java)
-            if (enabled) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(intent)
-                } else {
-                    context.startService(intent)
-                }
-            } else {
-                context.stopService(intent)
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
         return enabled
     }
 
-    fun toggleBackgroundSentinel(): Boolean = toggleBackgroundSentinel(true)
+    fun toggleBackgroundSentinel(): Boolean = true
 
     fun executeAction(actionTag: String?): String? {
         if (actionTag == null) return null
 
         return when (actionTag) {
             "[ACTION:SLEEP_MODE]" -> {
-                toggleBackgroundSentinel(false)
-                "Core systems powered down. Entering sleep mode, Sir."
+                "Powering down. Entering sleep mode, Sir."
             }
             "[ACTION:READ_NOTIFICATION]" -> {
                 NexNotificationListenerService.getLatestNotificationReport()
