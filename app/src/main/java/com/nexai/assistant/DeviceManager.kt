@@ -32,10 +32,9 @@ class DeviceManager(private val context: Context) {
     }
 
     // =========================================================================
-    // 📲 1. DYNAMIC ANY-APP LAUNCHER (Phone ka koi bhi app scan karke kholna)
+    // 📲 1. DYNAMIC ANY-APP LAUNCHER
     // =========================================================================
     fun launchAnyApp(rawAppName: String): String {
-        // Voice text me se extra shabd hatana (e.g., "calculator kholo" -> "calculator")
         val cleanName = rawAppName.lowercase(Locale.ROOT)
             .replace(Regex("(kholo|open|chalao|start|app|karo|bhai|please)"), "")
             .trim()
@@ -49,12 +48,17 @@ class DeviceManager(private val context: Context) {
             addCategory(Intent.CATEGORY_LAUNCHER)
         }
 
-        // Phone me installed sabhi launchable apps ki list
-        val installedApps: List<ResolveInfo> = pm.queryIntentActivities(mainIntent, 0)
+        val installedApps: List<ResolveInfo> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.queryIntentActivities(mainIntent, PackageManager.ResolveInfoFlags.of(0.toLong()))
+        } else {
+            @Suppress("DEPRECATION")
+            pm.queryIntentActivities(mainIntent, 0)
+        }
+
         var matchedPackage: String? = null
         var matchedAppName: String? = null
 
-        // 1st Priority: Exact App Name match (Label se jaise "Calculator", "Instagram")
+        // 1st Priority: Exact or partial label match
         for (info in installedApps) {
             val label = info.loadLabel(pm).toString().lowercase(Locale.ROOT)
             if (label == cleanName || label.contains(cleanName) || cleanName.contains(label)) {
@@ -64,7 +68,7 @@ class DeviceManager(private val context: Context) {
             }
         }
 
-        // 2nd Priority: Package name fallback (jaise agar user "insta" ya "whatsapp" bole)
+        // 2nd Priority: Package name fallback
         if (matchedPackage == null) {
             for (info in installedApps) {
                 val pkgName = info.activityInfo.packageName.lowercase(Locale.ROOT)
@@ -76,7 +80,6 @@ class DeviceManager(private val context: Context) {
             }
         }
 
-        // App ko launch karna
         return if (matchedPackage != null) {
             try {
                 val launchIntent = pm.getLaunchIntentForPackage(matchedPackage)
@@ -100,7 +103,6 @@ class DeviceManager(private val context: Context) {
     // 🔦 2. HARDWARE TOGGLES (Torch, Volume, Battery, Wi-Fi, BT)
     // =========================================================================
 
-    // --- TORCH ON / OFF ---
     fun toggleTorch(state: Boolean): String {
         return try {
             cameraId?.let { id ->
@@ -114,7 +116,6 @@ class DeviceManager(private val context: Context) {
         }
     }
 
-    // --- VOLUME CONTROLLER (Max / Mute / Silent) ---
     fun setVolumeMax(): String {
         return try {
             val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
@@ -135,11 +136,14 @@ class DeviceManager(private val context: Context) {
         }
     }
 
-    // --- BATTERY REPORT ---
     fun getBatteryReport(): String {
         return try {
             val batteryFilter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-            val batteryStatus = context.registerReceiver(null, batteryFilter)
+            val batteryStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(null, batteryFilter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                context.registerReceiver(null, batteryFilter)
+            }
 
             val level = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
             val scale = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
@@ -152,11 +156,11 @@ class DeviceManager(private val context: Context) {
             val chargeState = if (isCharging) "charger connected hai" else "battery mode par hai"
             "Sir, battery level $percentage% hai aur device abhi $chargeState."
         } catch (e: Exception) {
+            Log.e(TAG, "Battery error: ${e.message}")
             "Battery status read karne me error aaya."
         }
     }
 
-    // --- WI-FI SETTINGS PANEL ---
     fun openWifiSettings(): String {
         return try {
             val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -173,7 +177,6 @@ class DeviceManager(private val context: Context) {
         }
     }
 
-    // --- BLUETOOTH SETTINGS PANEL ---
     fun openBluetoothSettings(): String {
         return try {
             val intent = Intent(Settings.ACTION_BLUETOOTH_SETTINGS).apply {
@@ -186,8 +189,9 @@ class DeviceManager(private val context: Context) {
         }
     }
 
+
     // =========================================================================
-    // ⏰ 3. DIALPAD & ALARMS (Bonus Shortcuts)
+    // ⏰ 3. DIALPAD & ALARMS
     // =========================================================================
     fun openDialpad(number: String = ""): String {
         val intent = Intent(Intent.ACTION_DIAL).apply {
@@ -198,7 +202,7 @@ class DeviceManager(private val context: Context) {
         return "Opening dialpad, Sir."
     }
 
-    fun setQuickAlarm(hour: Int, minutes: Int, message: String): String {
+    fn setQuickAlarm(hour: Int, minutes: Int, message: String): String {
         val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
             putExtra(AlarmClock.EXTRA_HOUR, hour)
             putExtra(AlarmClock.EXTRA_MINUTES, minutes)
