@@ -108,7 +108,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onNewIntent(intent: Intent?) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleWakeUpIntent(intent)
     }
@@ -637,7 +637,6 @@ fun MainMasterScreen(
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // Glowing Pulsing Arc Orb in Center
                         MiniArcReactor(isGlowing = true)
 
                         Spacer(modifier = Modifier.height(12.dp))
