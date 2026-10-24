@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -68,10 +69,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var voiceManager: VoiceManager
     private var vibrator: Vibrator? = null
 
-    // Callbacks for live voice queries
     private var activeVoiceQueryHandler: ((String) -> Unit)? = null
 
-    // State for bottom-center HUD
     var isBottomHudActive by mutableStateOf(false)
     var hudSpeakingState by mutableStateOf(false)
     var hudText by mutableStateOf("Listening to Sir...")
@@ -84,7 +83,7 @@ class MainActivity : ComponentActivity() {
         chatHistoryManager = ChatHistoryManager(this)
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
 
-        // Pre-initialize VoiceManager so speech engine is immediately ready
+        // Pre-initialize Voice Engine immediately
         voiceManager = VoiceManager(
             context = this,
             prefs = prefs,
@@ -109,6 +108,10 @@ class MainActivity : ComponentActivity() {
                     hudText = hudText,
                     onCloseHud = { isBottomHudActive = false },
                     onVibrate = { triggerHaptic() },
+                    onTestAudio = {
+                        voiceManager.speak("Testing audio systems. Hello Sir, Nex speaker is fully operational!")
+                        Toast.makeText(this, "Testing Audio Speaker...", Toast.LENGTH_SHORT).show()
+                    },
                     onToggleMasterActive = { makeActive ->
                         toggleMasterCore(makeActive)
                     },
@@ -147,10 +150,10 @@ class MainActivity : ComponentActivity() {
 
         if (makeActive) {
             voiceManager.speak("Hello Sir! Nex is online and listening.")
-            Toast.makeText(this, "Nex AI: ACTIVE (Listening for 'Nex')", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Nex AI: ACTIVE", Toast.LENGTH_SHORT).show()
         } else {
-            voiceManager.speak("Nex entering standby, Sir.")
-            Toast.makeText(this, "Nex AI: INACTIVE (Standby)", Toast.LENGTH_SHORT).show()
+            voiceManager.speak("Nex entering standby mode, Sir.")
+            Toast.makeText(this, "Nex AI: INACTIVE", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -199,7 +202,7 @@ class MainActivity : ComponentActivity() {
                     rawReply.startsWith("[ACTION:") -> {
                         val actionTag = rawReply.substringBefore("]") + "]"
                         val actionResult = deviceManager.executeAction(actionTag)
-                        actionResult ?: "Action completed, Sir."
+                        actionResult ?: "Action executed, Sir."
                     }
                     else -> rawReply
                 }
@@ -230,6 +233,7 @@ fun MainMasterScreen(
     hudText: String,
     onCloseHud: () -> Unit,
     onVibrate: () -> Unit,
+    onTestAudio: () -> Unit,
     onToggleMasterActive: (Boolean) -> Unit,
     onOpenNotificationSettings: () -> Unit,
     onSendMessage: (String, List<ChatMessage>, (String?, String?) -> Unit) -> Unit,
@@ -248,7 +252,7 @@ fun MainMasterScreen(
             in 17..21 -> "Good evening"
             else -> "Hello"
         }
-        return "$timeSalutation, ${prefs.ownerName}! Nex AI online hai. Say 'Nex' anytime ya mic dabakar boliye. Aaj kya guidance chahiye?"
+        return "$timeSalutation, ${prefs.ownerName}! Nex AI online hai. Mic dabakar boliye ya type karein. Aaj kya guidance chahiye?"
     }
 
     var sessionsList by remember { mutableStateOf(chatHistoryManager.getAllSessions()) }
@@ -263,7 +267,6 @@ fun MainMasterScreen(
     var showSettings by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
-    // Helper to send query and auto-reply
     fun submitMessage(prompt: String) {
         val cleanPrompt = prompt.trim()
         if (cleanPrompt.isNotBlank() && !isThinking) {
@@ -287,7 +290,6 @@ fun MainMasterScreen(
         }
     }
 
-    // Bind incoming voice recognition directly to auto-submit!
     LaunchedEffect(Unit) {
         onBindVoiceHandler { recognizedSpeech ->
             submitMessage(recognizedSpeech)
@@ -427,7 +429,7 @@ fun MainMasterScreen(
                                 Column {
                                     Text("Nex AI", color = TextWhite, fontSize = 18.sp)
                                     Text(
-                                        if (isMasterActive) "ALL-TIME ON • ACTIVE" else "STANDBY (Tap to Activate)",
+                                        if (isMasterActive) "ACTIVE COMPANION" else "STANDBY",
                                         color = if (isMasterActive) Color(0xFF00F5D4) else TextMuted,
                                         fontSize = 10.sp
                                     )
@@ -452,73 +454,92 @@ fun MainMasterScreen(
                         .fillMaxSize()
                         .padding(innerPadding)
                 ) {
-                    // MASTER ACTIVE / INACTIVE POWER CORE BAR
+                    // MASTER ACTIVE / INACTIVE POWER CORE BAR WITH TEST VOICE BUTTON
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                            .clickable {
-                                isMasterActive = !isMasterActive
-                                onToggleMasterActive(isMasterActive)
-                            },
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = if (isMasterActive) Color(0xFF0E3A42) else DeepCardNavy
                         ),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
                                     modifier = Modifier
-                                        .size(42.dp)
-                                        .clip(CircleShape)
-                                        .background(if (isMasterActive) AccentCyan else SurfaceAccent),
-                                    contentAlignment = Alignment.Center
+                                        .weight(1f)
+                                        .clickable {
+                                            isMasterActive = !isMasterActive
+                                            onToggleMasterActive(isMasterActive)
+                                        },
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        Icons.Default.PowerSettingsNew,
-                                        contentDescription = "Core Toggle",
-                                        tint = if (isMasterActive) Color.Black else TextWhite
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isMasterActive) AccentCyan else SurfaceAccent),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Default.PowerSettingsNew,
+                                            contentDescription = "Core Toggle",
+                                            tint = if (isMasterActive) Color.Black else TextWhite
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Text(
+                                            if (isMasterActive) "NEX: ACTIVE" else "NEX: INACTIVE",
+                                            color = TextWhite,
+                                            fontSize = 14.sp
+                                        )
+                                        Text(
+                                            if (isMasterActive) "Online & Listening" else "Tap switch to Activate",
+                                            color = if (isMasterActive) AccentCyan else TextMuted,
+                                            fontSize = 11.sp
+                                        )
+                                    }
                                 }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(
-                                        if (isMasterActive) "NEX CORE: ACTIVE" else "NEX CORE: INACTIVE",
-                                        color = TextWhite,
-                                        fontSize = 14.sp
-                                    )
-                                    Text(
-                                        if (isMasterActive) "Listening • Say 'Nex' anytime" else "Tap to turn ON All-Time Companion",
-                                        color = if (isMasterActive) AccentCyan else TextMuted,
-                                        fontSize = 11.sp
-                                    )
-                                }
+
+                                Switch(
+                                    checked = isMasterActive,
+                                    onCheckedChange = { active ->
+                                        isMasterActive = active
+                                        onToggleMasterActive(active)
+                                    }
+                                )
                             }
-                            Switch(
-                                checked = isMasterActive,
-                                onCheckedChange = { active ->
-                                    isMasterActive = active
-                                    onToggleMasterActive(active)
-                                }
-                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Direct Test Audio Button
+                            Button(
+                                onClick = onTestAudio,
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = SurfaceAccent),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(Icons.Default.VolumeUp, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("🔊 Test Audio Speaker (Tap to verify sound)", color = TextWhite, fontSize = 12.sp)
+                            }
                         }
                     }
 
-                    // Notification Access Helper Card
+                    // Notification Access Card
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .padding(horizontal = 16.dp, vertical = 2.dp)
                             .clickable { onOpenNotificationSettings() },
                         colors = CardDefaults.cardColors(containerColor = SurfaceAccent),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(10.dp)
                     ) {
                         Row(
                             modifier = Modifier
@@ -526,7 +547,7 @@ fun MainMasterScreen(
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Notifications, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Notifications, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 "Allow Notification Access (to ask 'Kaun message kiya?')",
@@ -572,7 +593,15 @@ fun MainMasterScreen(
                         IconButton(
                             onClick = {
                                 onVibrate()
-                                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                if (ContextCompat.checkSelfPermission(
+                                        this@MainActivity,
+                                        Manifest.permission.RECORD_AUDIO
+                                    ) == PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    onStartVoiceListening()
+                                } else {
+                                    permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
                             }
                         ) {
                             Icon(Icons.Default.Mic, contentDescription = "Voice Input", tint = AccentCyan)
@@ -665,7 +694,6 @@ fun MainMasterScreen(
     }
 }
 
-// Mini Glowing Arc Reactor Widget
 @Composable
 fun MiniArcReactor(isGlowing: Boolean) {
     val infiniteTransition = rememberInfiniteTransition(label = "ArcPulse")
@@ -781,7 +809,6 @@ fun ChatBubble(message: ChatMessage) {
     }
 }
 
-// Master Settings Panel
 @Composable
 fun MasterSettingsDialog(
     prefs: PreferencesManager,
@@ -804,7 +831,7 @@ fun MasterSettingsDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Nex AI Controls", color = TextWhite, fontSize = 18.sp)
                 Spacer(modifier = Modifier.weight(1f))
-                Text("v3.6 Pro", color = AccentCyan, fontSize = 11.sp)
+                Text("v3.7 Ultra", color = AccentCyan, fontSize = 11.sp)
             }
         },
         text = {
