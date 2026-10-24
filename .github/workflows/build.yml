@@ -1,4 +1,4 @@
-name: Build Nex AI Diagnostic
+name: Build Nex AI (Auto-Fix Wrapper)
 
 on:
   push:
@@ -19,15 +19,18 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Grant Execute Permission
-      run: |
-        if [ -f "gradlew" ]; then
-          chmod +x gradlew
-        else
-          echo "❌ ERROR: gradlew file missing hai repository me!" >> $GITHUB_STEP_SUMMARY
-        fi
+    - name: Setup Gradle Environment
+      uses: gradle/actions/setup-gradle@v3
 
-    - name: Run Build & Catch Real Error
+    - name: Auto-Generate Missing Gradle Wrapper
+      run: |
+        if [ ! -f "gradlew" ]; then
+          echo "⚠️ gradlew file missing thi, automatic generate kar rahe hain..."
+          gradle wrapper
+        fi
+        chmod +x gradlew
+
+    - name: Run Build
       run: |
         set +e
         ./gradlew assembleDebug --stacktrace > build_output.log 2>&1
@@ -36,17 +39,14 @@ jobs:
         if [ $BUILD_STATUS -ne 0 ]; then
           echo "### ❌ Build Fail Hua! Asli Problem Neeche Hai:" >> $GITHUB_STEP_SUMMARY
           echo '```text' >> $GITHUB_STEP_SUMMARY
-          
-          # Kotlin aur Gradle ke main errors filter karna
           grep -E -C 2 "e: |FAILURE:|Unresolved reference|Compilation error|Could not find" build_output.log | head -n 40 >> $GITHUB_STEP_SUMMARY
-          
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "--- [Aakhiri 25 Lines] ---" >> $GITHUB_STEP_SUMMARY
           tail -n 25 build_output.log >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           exit 1
         else
-          echo "### 🎉 Mubarak ho! Build Success ho gaya!" >> $GITHUB_STEP_SUMMARY
+          echo "### 🎉 Mubarak ho! Build Success ho gaya! APK Ban Gaya!" >> $GITHUB_STEP_SUMMARY
         fi
 
     - name: Upload APK on Success
@@ -54,11 +54,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: NexAI-Debug-APK
-        path: app/build/outputs/apk/debug/app-debug.apk
-
-    - name: Upload Error Log File
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: Full-Error-Log
-        path: build_output.log
+        path: "**/build/outputs/apk/debug/*.apk"
