@@ -31,31 +31,45 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        deviceManager = DeviceManager(this)
-        geminiRepository = GeminiRepository()
-        
-        voiceManager = VoiceManager(
-            context = this,
-            onSpeechResult = { userSpokenText ->
-                processUserCommand(userSpokenText)
-            },
-            onError = { errorMessage ->
-                voiceManager.speak("Sir, aawaz saaf nahi aayi. Dobara boliye.")
-            }
-        )
+        try {
+            deviceManager = DeviceManager(this)
+            geminiRepository = GeminiRepository()
+            
+            voiceManager = VoiceManager(
+                context = this,
+                onSpeechResult = { userSpokenText ->
+                    processUserCommand(userSpokenText)
+                },
+                onError = { errorMessage ->
+                    voiceManager.speak("Sir, aawaz detect nahi hui. Dobara boliye.")
+                }
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
 
         setContent {
             NexJarvisScreen(
                 onStartListening = {
-                    voiceManager.startListening()
+                    try {
+                        voiceManager.startListening()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                 },
                 onStopAndPowerOff = {
-                    voiceManager.enterSleepMode()
-                    deviceManager.toggleBackgroundSentinel(false)
+                    try {
+                        voiceManager.enterSleepMode()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                 },
                 onWakeUp = {
-                    voiceManager.wakeUp()
-                    deviceManager.toggleBackgroundSentinel(true)
+                    try {
+                        voiceManager.wakeUp()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                 }
             )
         }
@@ -63,30 +77,38 @@ class MainActivity : ComponentActivity() {
 
     private fun processUserCommand(command: String) {
         CoroutineScope(Dispatchers.Main).launch {
-            val responseResult = geminiRepository.getResponse(command)
-            val replyText = responseResult.getOrDefault("Sir, connection issue aa raha hai.")
+            try {
+                val responseResult = geminiRepository.getResponse(command)
+                val replyText = responseResult.getOrDefault("Sir, response me issue aaya.")
 
-            // Check hardware actions (Flashlight, battery, sleep mode etc)
-            val regex = "\\[ACTION:[A-Z_]+\\]".toRegex()
-            val match = regex.find(replyText)
-            val actionTag = match?.value
-            val cleanReply = replyText.replace(regex, "").trim()
+                // Check action tags (Flashlight, battery, etc)
+                val regex = "\\[ACTION:[A-Z_]+\\]".toRegex()
+                val match = regex.find(replyText)
+                val actionTag = match?.value
+                val cleanReply = replyText.replace(regex, "").trim()
 
-            if (actionTag != null) {
-                val actionResult = deviceManager.executeAction(actionTag)
-                if (actionResult != null) {
-                    voiceManager.speak(actionResult)
-                    return@launch
+                if (actionTag != null) {
+                    val actionResult = deviceManager.executeAction(actionTag)
+                    if (actionResult != null) {
+                        voiceManager.speak(actionResult)
+                        return@launch
+                    }
                 }
-            }
 
-            voiceManager.speak(cleanReply)
+                voiceManager.speak(cleanReply)
+            } catch (e: Exception) {
+                voiceManager.speak("Sir, satellite connection interrupted.")
+            }
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        voiceManager.destroy()
+        try {
+            voiceManager.destroy()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 }
 
@@ -97,7 +119,7 @@ fun NexJarvisScreen(
     onWakeUp: () -> Unit
 ) {
     var isPowerOn by remember { mutableStateOf(true) }
-    var statusText by remember { mutableStateOf("TAP ARC-REACTOR TO TALK") }
+    var statusText by remember { mutableStateOf("TAP CENTER ARC-REACTOR TO TALK") }
 
     Column(
         modifier = Modifier
@@ -107,7 +129,7 @@ fun NexJarvisScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // Top Header
+        // Top Stark HUD Header
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = "J.A.R.V.I.S.",
@@ -124,7 +146,7 @@ fun NexJarvisScreen(
             )
         }
 
-        // Center Arc-Reactor Mic Button
+        // Center Arc-Reactor Mic Button (Cyan Glow)
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
@@ -134,8 +156,10 @@ fun NexJarvisScreen(
                 .border(4.dp, if (isPowerOn) Color(0xFF00E5FF) else Color(0xFFFF1744), CircleShape)
                 .clickable {
                     if (isPowerOn) {
-                        statusText = "LISTENING... SPEAK NOW"
+                        statusText = "LISTENING... SPEAK NOW SIR"
                         onStartListening()
+                    } else {
+                        statusText = "SYSTEM IS OFF. PRESS POWER ON FIRST"
                     }
                 }
         ) {
@@ -143,12 +167,12 @@ fun NexJarvisScreen(
                 Text(
                     text = if (isPowerOn) "NEX" else "OFFLINE",
                     color = if (isPowerOn) Color.White else Color(0xFFFF5252),
-                    fontSize = 24.sp,
+                    fontSize = 26.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = if (isPowerOn) "ONLINE" else "SLEEP",
+                    text = if (isPowerOn) "ONLINE (TAP)" else "SLEEP",
                     color = if (isPowerOn) Color(0xFF00E5FF) else Color.Gray,
                     fontSize = 12.sp,
                     letterSpacing = 1.sp
@@ -156,7 +180,7 @@ fun NexJarvisScreen(
             }
         }
 
-        // Status Indicator
+        // Status Feedback
         Text(
             text = statusText,
             color = Color(0xFFB0BEC5),
@@ -164,12 +188,12 @@ fun NexJarvisScreen(
             letterSpacing = 1.sp
         )
 
-        // Bottom Controls: WAKE ON / POWER OFF BUTTONS
+        // Bottom Controls: POWER ON & RED POWER OFF
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            // Power ON Button
+            // Power ON Button (Safe, No-Crash)
             Button(
                 onClick = {
                     isPowerOn = true
@@ -182,11 +206,11 @@ fun NexJarvisScreen(
                 Text(text = "POWER ON", color = Color.Black, fontWeight = FontWeight.Bold)
             }
 
-            // RED POWER OFF BUTTON (Instant Sleep Mode)
+            // RED POWER OFF Button (Safe Standby)
             Button(
                 onClick = {
                     isPowerOn = false
-                    statusText = "SYSTEMS SHUT DOWN (SLEEP)"
+                    statusText = "SYSTEM POWERED DOWN (SLEEP)"
                     onStopAndPowerOff()
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF1744)),
