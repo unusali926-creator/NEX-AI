@@ -8,6 +8,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.Voice
 import java.util.Locale
 
 class VoiceManager(
@@ -29,52 +30,64 @@ class VoiceManager(
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            setupTtsEngine()
+            setupProfessionalHdVoice()
             isTtsReady = true
 
-            // Agar pehle se koi aawaz queue me thi (jaise Hello Sir), to turant bolo
             val queued = pendingSpeech
             if (queued != null) {
                 speak(queued)
                 pendingSpeech = null
             }
         } else {
-            onError("TTS engine initialize nahi ho saka.")
+            onError("TTS engine offline.")
         }
     }
 
-    private fun setupTtsEngine() {
-        // Step 1: Pehle check karo phone me Hindi hai ya nahi
-        var result = tts?.setLanguage(Locale("hi", "IN"))
-        
-        // Step 2: Agar phone me Hindi nahi hai, to chup mat raho! Turant English (India ya US) set karo
-        if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-            result = tts?.setLanguage(Locale("en", "IN"))
-            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                tts?.language = Locale.US
-            }
+    private fun setupProfessionalHdVoice() {
+        // High Quality Natural Voice selection without robotic distortions
+        val targetLocale = Locale("en", "IN")
+        var res = tts?.setLanguage(targetLocale)
+        if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
+            tts?.language = Locale.US
         }
-        tts?.setPitch(0.85f) // JARVIS style slightly deep pitch
-        tts?.setSpeechRate(1.0f)
+
+        // Select the highest quality HD voice available on the device
+        try {
+            val availableVoices = tts?.voices
+            if (!availableVoices.isNullOrEmpty()) {
+                val bestVoice = availableVoices.firstOrNull { voice ->
+                    !voice.isNetworkConnectionRequired &&
+                            (voice.quality >= Voice.QUALITY_HIGH) &&
+                            (voice.locale.language == "en" || voice.locale.language == "hi")
+                } ?: availableVoices.firstOrNull { it.locale.language == "en" }
+
+                if (bestVoice != null) {
+                    tts?.voice = bestVoice
+                }
+            }
+        } catch (e: Exception) {
+            // Fallback to default engine configuration
+        }
+
+        // Clean natural pitch (1.0f = no distortion, studio clear)
+        tts?.setPitch(1.0f)
+        tts?.setSpeechRate(1.05f)
     }
 
     fun ensureAudibleVolume() {
         try {
             audioManager?.let {
-                val currentVol = it.getStreamVolume(AudioManager.STREAM_MUSIC)
                 val maxVol = it.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                if (currentVol < (maxVol * 0.5f).toInt()) {
-                    it.setStreamVolume(AudioManager.STREAM_MUSIC, (maxVol * 0.75f).toInt(), AudioManager.FLAG_SHOW_UI)
-                }
+                it.setStreamVolume(AudioManager.STREAM_MUSIC, (maxVol * 0.85f).toInt(), AudioManager.FLAG_SHOW_UI)
             }
         } catch (e: Exception) {
-            // Ignore volume adjustments
+            // Ignore
         }
     }
 
     fun startListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            onError("Phone me Speech Recognition available nahi hai.")
+            onError("Speech recognition hardware unavailable.")
             return
         }
 
@@ -90,11 +103,11 @@ class VoiceManager(
 
                     override fun onError(error: Int) {
                         val message = when (error) {
-                            SpeechRecognizer.ERROR_NO_MATCH -> "Kuch sunai nahi diya, kripya thoda tez aur saaf boliye."
-                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Samay samapt. Mic dabate hi bolna shuru karein."
-                            SpeechRecognizer.ERROR_AUDIO -> "Audio recording me dikkat."
-                            SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Internet check karein."
-                            else -> "Kripya dobara boliye."
+                            SpeechRecognizer.ERROR_NO_MATCH -> "No speech matched. Please command again, Sir."
+                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Listening timed out."
+                            SpeechRecognizer.ERROR_AUDIO -> "Audio hardware busy."
+                            SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network connection required."
+                            else -> "Awaiting voice command."
                         }
                         onError(message)
                     }
@@ -104,7 +117,7 @@ class VoiceManager(
                         if (!matches.isNullOrEmpty()) {
                             onSpeechResult(matches[0])
                         } else {
-                            onError("Kuch sunai nahi diya.")
+                            onError("Awaiting instructions, Sir.")
                         }
                     }
 
@@ -115,22 +128,22 @@ class VoiceManager(
 
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toString())
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN")
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hi-IN")
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3500L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3500L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             }
             speechRecognizer?.startListening(intent)
         } catch (e: Exception) {
-            onError("Mic start error: ${e.localizedMessage}")
+            onError("Microphone error: " + (e.message ?: "hardware error"))
         }
     }
 
     fun speak(text: String) {
         ensureAudibleVolume()
         if (isTtsReady) {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "NexTTS_Alert")
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "NexProfessionalVoice")
         } else {
             pendingSpeech = text
         }
@@ -144,7 +157,7 @@ class VoiceManager(
             tts?.stop()
             tts?.shutdown()
         } catch (e: Exception) {
-            // Ignore cleanup
+            // Ignore
         }
     }
 }
