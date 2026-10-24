@@ -7,6 +7,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,7 +24,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CoroutineScope
@@ -33,16 +38,18 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var prefs: PreferencesManager
     private lateinit var geminiRepo: GeminiRepository
+    private lateinit var deviceManager: DeviceManager
     private lateinit var voiceManager: VoiceManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = PreferencesManager(this)
         geminiRepo = GeminiRepository(prefs)
+        deviceManager = DeviceManager(this)
 
         setContent {
             NexTheme {
-                MainChatScreen(
+                MainJarvisScreen(
                     prefs = prefs,
                     onSendMessage = { query, updateHistory, onComplete ->
                         handleQuery(query, updateHistory, onComplete)
@@ -68,13 +75,24 @@ class MainActivity : ComponentActivity() {
         val coroutineScope = CoroutineScope(Dispatchers.Main)
         coroutineScope.launch {
             val result = geminiRepo.getResponse(history, query)
-            result.onSuccess { reply ->
-                if (prefs.isTtsEnabled) {
-                    voiceManager.speak(reply)
+            result.onSuccess { rawReply ->
+                // Check if reply contains an Action Tag to execute hardware
+                val finalMessage = if (rawReply.startsWith("[ACTION:")) {
+                    val actionTag = rawReply.substringBefore("]") + "]"
+                    val actionResult = deviceManager.executeAction(actionTag)
+                    actionResult ?: "Sir, action execute kiya gaya."
+                } else {
+                    rawReply
                 }
-                onComplete(reply, null)
+
+                if (prefs.isTtsEnabled) {
+                    if (::voiceManager.isInitialized) {
+                        voiceManager.speak(finalMessage)
+                    }
+                }
+                onComplete(finalMessage, null)
             }.onFailure { err ->
-                onComplete(null, err.localizedMessage ?: "Unknown error occurred.")
+                onComplete(null, err.localizedMessage ?: "Systems busy, Sir.")
             }
         }
     }
@@ -89,7 +107,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainChatScreen(
+fun MainJarvisScreen(
     prefs: PreferencesManager,
     onSendMessage: (String, List<ChatMessage>, (String?, String?) -> Unit) -> Unit,
     onStartVoice: ((String) -> Unit) -> Unit
@@ -98,7 +116,7 @@ fun MainChatScreen(
         mutableStateListOf(
             ChatMessage(
                 sender = Sender.NEX,
-                text = "Namaste! I'm Nex, your AI buddy. Kaise hain aap? How can I help you today?"
+                text = "Systems online, Sir. Nex JARVIS is operational. Flashlight, Battery, Apps aur World Knowledge commands ready hain. Awaiting orders."
             )
         )
     }
@@ -121,7 +139,17 @@ fun MainChatScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Nex AI", color = TextWhite, fontSize = 20.sp) },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Corner Mini Arc Reactor (Pulsing & Glowing Widget)
+                        MiniArcReactor(isGlowing = isThinking)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text("Nex JARVIS", color = TextWhite, fontSize = 18.sp)
+                            Text("Systems Active", color = AccentCyan, fontSize = 11.sp)
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DeepCardNavy),
                 actions = {
                     IconButton(onClick = { showSettings = true }) {
@@ -137,11 +165,12 @@ fun MainChatScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            // Chat history list
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 state = listState
             ) {
                 items(messages) { msg ->
@@ -151,15 +180,16 @@ fun MainChatScreen(
                 if (isThinking) {
                     item {
                         Text(
-                            text = "Nex is thinking...",
-                            color = TextMuted,
-                            fontSize = 13.sp,
+                            text = "JARVIS is computing protocol...",
+                            color = AccentCyan,
+                            fontSize = 12.sp,
                             modifier = Modifier.padding(start = 8.dp, bottom = 8.dp)
                         )
                     }
                 }
             }
 
+            // Input Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -178,7 +208,7 @@ fun MainChatScreen(
                 TextField(
                     value = inputText,
                     onValueChange = { inputText = it },
-                    placeholder = { Text("Ask Nex in Hindi, English...", color = TextMuted) },
+                    placeholder = { Text("Command JARVIS (e.g. Torch on, Battery...)", color = TextMuted, fontSize = 13.sp) },
                     modifier = Modifier.weight(1f),
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent,
@@ -223,6 +253,89 @@ fun MainChatScreen(
     }
 }
 
+// Mini Glowing Corner Arc Reactor Widget (Pulsing and Rotating Core)
+@Composable
+fun MiniArcReactor(isGlowing: Boolean) {
+    val infiniteTransition = rememberInfiniteTransition(label = "ArcReactorPulse")
+    
+    // Rotating ticks
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = if (isGlowing) 2000 else 6000, easing = LinearEasing)
+        ),
+        label = "Rotation"
+    )
+
+    // Pulsing Core Size
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.85f,
+        targetValue = 1.15f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = if (isGlowing) 400 else 1400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "Pulse"
+    )
+
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .padding(2.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val center = Offset(size.width / 2, size.height / 2)
+            val outerRadius = size.minDimension / 2 - 2
+
+            // Outer Glowing Cyan Circle
+            drawCircle(
+                color = Color(0xFF00F5D4),
+                radius = outerRadius,
+                center = center,
+                style = Stroke(width = 2.dp.toPx())
+            )
+
+            // Inner Rotating Segments
+            rotate(rotation, center) {
+                drawCircle(
+                    color = Color(0xFF5BC0BE),
+                    radius = outerRadius * 0.7f,
+                    center = center,
+                    style = Stroke(width = 1.5.dp.toPx())
+                )
+                // 3 Futuristic Arc Points
+                drawLine(
+                    color = Color(0xFF00F5D4),
+                    start = center,
+                    end = Offset(center.x, center.y - outerRadius * 0.7f),
+                    strokeWidth = 2.dp.toPx()
+                )
+                drawLine(
+                    color = Color(0xFF00F5D4),
+                    start = center,
+                    end = Offset(center.x - outerRadius * 0.6f, center.y + outerRadius * 0.4f),
+                    strokeWidth = 2.dp.toPx()
+                )
+                drawLine(
+                    color = Color(0xFF00F5D4),
+                    start = center,
+                    end = Offset(center.x + outerRadius * 0.6f, center.y + outerRadius * 0.4f),
+                    strokeWidth = 2.dp.toPx()
+                )
+            }
+
+            // Center Bright Pulsing Core
+            drawCircle(
+                color = Color.White,
+                radius = (outerRadius * 0.28f) * pulseScale,
+                center = center
+            )
+        }
+    }
+}
+
 @Composable
 fun ChatBubble(message: ChatMessage) {
     val isUser = message.sender == Sender.USER
@@ -257,7 +370,7 @@ fun ChatBubble(message: ChatMessage) {
                 .background(bubbleColor)
                 .padding(14.dp)
         ) {
-            Text(text = message.text, color = textColor, fontSize = 15.sp)
+            Text(text = message.text, color = textColor, fontSize = 14.sp)
         }
     }
 }
@@ -271,13 +384,13 @@ fun SettingsDialog(prefs: PreferencesManager, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = DeepCardNavy,
-        title = { Text("Settings & Privacy", color = TextWhite) },
+        title = { Text("JARVIS Protocols", color = TextWhite) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 OutlinedTextField(
                     value = key,
                     onValueChange = { key = it },
-                    label = { Text("Gemini API Key", color = TextMuted) },
+                    label = { Text("Gemini Key (Optional)", color = TextMuted) },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = TextWhite,
@@ -285,9 +398,9 @@ fun SettingsDialog(prefs: PreferencesManager, onDismiss: () -> Unit) {
                     )
                 )
                 Text(
-                    "Your key stays strictly on this device. Get a free key at aistudio.google.com.",
+                    "Note: Key is 100% Optional. JARVIS works free without any key.",
                     fontSize = 11.sp,
-                    color = TextMuted
+                    color = AccentCyan
                 )
 
                 Row(
@@ -295,7 +408,7 @@ fun SettingsDialog(prefs: PreferencesManager, onDismiss: () -> Unit) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Spoken Voice Responses", color = TextWhite)
+                    Text("JARVIS Voice Feedback", color = TextWhite)
                     Switch(
                         checked = ttsEnabled,
                         onCheckedChange = { ttsEnabled = it }
@@ -307,7 +420,7 @@ fun SettingsDialog(prefs: PreferencesManager, onDismiss: () -> Unit) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Default Tone: $language", color = TextWhite)
+                    Text("Tone: $language", color = TextWhite)
                     Button(
                         onClick = {
                             language = when (language) {
@@ -333,12 +446,12 @@ fun SettingsDialog(prefs: PreferencesManager, onDismiss: () -> Unit) {
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = AccentCyan)
             ) {
-                Text("Save", color = Color.Black)
+                Text("Save Protocols", color = Color.Black)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = TextWhite)
+                Text("Dismiss", color = TextWhite)
             }
         }
     )
