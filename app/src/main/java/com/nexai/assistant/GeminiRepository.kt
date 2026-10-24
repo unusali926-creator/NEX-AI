@@ -2,34 +2,24 @@ package com.nexai.assistant
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
 import java.net.URLEncoder
-import java.util.concurrent.TimeUnit
 
-data class NexResponse(
-    val replyText: String,
-    val actionTag: String? = null
-)
-
-class GeminiRepository(private val groqApiKey: String = "") {
-
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .build()
+class GeminiRepository(
+    private val preferencesManager: PreferencesManager? = null,
+    private val groqApiKey: String = ""
+) {
 
     private val systemPrompt = """
-        You are Nex AI, an advanced JARVIS-class AI assistant created for Tony Stark standards.
-        Always address the user politely as 'Sir'. Keep responses concise (1-2 sentences), sharp, witty.
+        You are Nex AI, a next-generation JARVIS assistant for Tony Stark standards.
+        Always call the user 'Sir'. Keep responses concise (1-2 sentences), sharp, and witty.
         Languages: English, Hindi, Hinglish, Urdu, Bengali, Punjabi.
         
-        CRITICAL HARDWARE ACTIONS:
-        If user wants hardware actions, append an exact tag at the very end of your response:
+        CRITICAL HARDWARE ACTION TAGS:
         - Turn on flashlight: [ACTION:FLASHLIGHT_ON]
         - Turn off flashlight: [ACTION:FLASHLIGHT_OFF]
         - Check battery: [ACTION:BATTERY]
@@ -40,79 +30,100 @@ class GeminiRepository(private val groqApiKey: String = "") {
         - Open Camera: [ACTION:OPEN_CAMERA]
     """.trimIndent()
 
-    suspend fun getResponse(userMessage: String): NexResponse = withContext(Dispatchers.IO) {
-        // 1. Try Groq (Fastest) if key exists
-        if (groqApiKey.isNotBlank() && groqApiKey != "APNI_KEY_YAHAN_DALO") {
-            try {
-                val groqReply = callGroqApi(userMessage)
-                if (groqReply != null) return@withContext parseActionTag(groqReply)
-            } catch (e: Exception) {
-                // Fallback to Pollinations
+    // MainActivity ke call ke liye exact match
+    suspend fun getResponse(
+        chatHistory: List<ChatMessage>,
+        userMessage: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            // 1. Check if Groq key is available
+            val activeKey = if (groqApiKey.isNotBlank() && groqApiKey != "APNI_KEY_YAHAN_DALO") {
+                groqApiKey
+            } else {
+                ""
             }
-        }
 
-        // 2. Fallback: Free Zero-Key Pollinations Engine
-        return@withContext callPollinations(userMessage)
+            if (activeKey.isNotBlank()) {
+                val groqReply = callGroq(activeKey, userMessage)
+                if (groqReply != null) return@withContext Result.success(groqReply)
+            }
+
+            // 2. Fallback: Free Zero-Key Pollinations Engine
+            val pollReply = callPollinations(userMessage)
+            Result.success(pollReply)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
-    private fun callGroqApi(message: String): String? {
-        val url = "https://api.groq.com/openai/v1/chat/completions"
-        val jsonPayload = JSONObject().apply {
-            put("model", "llama-3.3-70b-versatile")
-            put("messages", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("role", "system")
-                    put("content", systemPrompt)
-                })
-                put(JSONObject().apply {
-                    put("role", "user")
-                    put("content", message)
-                })
-            })
-            put("max_tokens", 120)
-        }
+    // Overload for single parameter calls
+    suspend fun getResponse(userMessage: String): Result<String> {
+        return getResponse(emptyList(), userMessage)
+    }
 
-        val request = Request.Builder()
-            .url(url)
-            .addHeader("Authorization", "Bearer $groqApiKey")
-            .addHeader("Content-Type", "application/json")
-            .post(jsonPayload.toString().toRequestBody("application/json".toMediaType()))
-            .build()
+    private fun callGroq(apiKey: String, message: String): String? {
+        return try {
+            val url = URL("https://api.groq.com/openai/v1/chat/completions")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.setRequestProperty("Authorization", "Bearer $apiKey")
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.connectTimeout = 15000
+            conn.readTimeout = 20000
+            conn.doOutput = true
 
-        client.newCall(request).execute().use { response ->
-            if (response.isSuccessful) {
-                val body = response.body?.string() ?: return null
-                val json = JSONObject(body)
-                return json.getJSONArray("choices")
+            val jsonPayload = JSONObject().apply {
+                put("model", "llama-3.3-70b-versatile")
+                put("messages", JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "system")
+                        put("content", systemPrompt)
+                    })
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", message)
+                    })
+                })
+                put("max_tokens", 150)
+            }
+
+            OutputStreamWriter(conn.outputStream).use { writer ->
+                writer.write(jsonPayload.toString())
+                writer.flush()
+            }
+
+            if (conn.responseCode == 200) {
+                val response = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(response)
+                json.getJSONArray("choices")
                     .getJSONObject(0)
                     .getJSONObject("message")
                     .getString("content")
+            } else {
+                null
             }
+        } catch (e: Exception) {
+            null
         }
-        return null
     }
 
-    private fun callPollinations(message: String): NexResponse {
+    private fun callPollinations(message: String): String {
         return try {
             val fullPrompt = "$systemPrompt\nUser: $message"
             val encodedPrompt = URLEncoder.encode(fullPrompt, "UTF-8")
-            val url = "https://text.pollinations.ai/$encodedPrompt"
+            val url = URL("https://text.pollinations.ai/$encodedPrompt")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.connectTimeout = 15000
+            conn.readTimeout = 20000
 
-            val request = Request.Builder().url(url).build()
-            client.newCall(request).execute().use { response ->
-                val body = response.body?.string() ?: "Online and ready, Sir."
-                parseActionTag(body)
+            if (conn.responseCode == 200) {
+                conn.inputStream.bufferedReader().use { it.readText() }
+            } else {
+                "Online and standing by, Sir."
             }
         } catch (e: Exception) {
-            NexResponse("Sir, I am having trouble connecting to satellite feeds.", null)
+            "Sir, satellite link is weak. Core systems active."
         }
-    }
-
-    private fun parseActionTag(rawText: String): NexResponse {
-        val regex = "\\[ACTION:[A-Z_]+\\]".toRegex()
-        val match = regex.find(rawText)
-        val actionTag = match?.value
-        val cleanReply = rawText.replace(regex, "").trim()
-        return NexResponse(cleanReply, actionTag)
     }
 }
