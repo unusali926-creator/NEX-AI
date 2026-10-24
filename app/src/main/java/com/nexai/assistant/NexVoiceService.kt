@@ -24,7 +24,7 @@ class NexVoiceService : Service() {
     private var speechRecognizer: SpeechRecognizer? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private val handler = Handler(Looper.getMainLooper())
-    private var isListeningLoopActive = false
+    private var isStandbyLoopActive = false
 
     override fun onCreate() {
         super.onCreate()
@@ -36,20 +36,20 @@ class NexVoiceService : Service() {
         @Suppress("DEPRECATION")
         wakeLock = powerManager?.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
-            "NexAI::WakeWordLock"
+            "NexAI::AllTimeWakeLock"
         )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (!isListeningLoopActive) {
-            isListeningLoopActive = true
-            startWakeWordListener()
+        if (!isStandbyLoopActive) {
+            isStandbyLoopActive = true
+            startWakeWordLoop()
         }
         return START_STICKY
     }
 
-    private fun startWakeWordListener() {
-        if (!isListeningLoopActive) return
+    private fun startWakeWordLoop() {
+        if (!isStandbyLoopActive) return
 
         handler.post {
             try {
@@ -63,9 +63,8 @@ class NexVoiceService : Service() {
                         override fun onEndOfSpeech() {}
 
                         override fun onError(error: Int) {
-                            // Automatically restart listening loop after a brief delay
-                            if (isListeningLoopActive) {
-                                handler.postDelayed({ startWakeWordListener() }, 800)
+                            if (isStandbyLoopActive) {
+                                handler.postDelayed({ startWakeWordLoop() }, 800)
                             }
                         }
 
@@ -74,11 +73,11 @@ class NexVoiceService : Service() {
                             if (!matches.isNullOrEmpty()) {
                                 val spoken = matches[0].lowercase(Locale.ROOT)
                                 if (spoken.contains("nex") || spoken.contains("hey nex") || spoken.contains("jarvis")) {
-                                    triggerAppWakeUp()
+                                    triggerBottomHudInterface()
                                 }
                             }
-                            if (isListeningLoopActive) {
-                                handler.postDelayed({ startWakeWordListener() }, 400)
+                            if (isStandbyLoopActive) {
+                                handler.postDelayed({ startWakeWordLoop() }, 400)
                             }
                         }
 
@@ -94,20 +93,20 @@ class NexVoiceService : Service() {
                 }
                 speechRecognizer?.startListening(intent)
             } catch (e: Exception) {
-                if (isListeningLoopActive) {
-                    handler.postDelayed({ startWakeWordListener() }, 1000)
+                if (isStandbyLoopActive) {
+                    handler.postDelayed({ startWakeWordLoop() }, 1000)
                 }
             }
         }
     }
 
-    private fun triggerAppWakeUp() {
+    private fun triggerBottomHudInterface() {
         try {
             wakeLock?.acquire(3000L)
 
             val openIntent = Intent(this, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                putExtra("WAKE_UP_TRIGGERED", true)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                putExtra("AUTO_OPEN_BOTTOM_HUD", true)
             }
             startActivity(openIntent)
         } catch (e: Exception) {
@@ -119,10 +118,10 @@ class NexVoiceService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Nex AI Voice Standby",
+                "Nex AI All-Time Sentinel",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Listening for 'Nex' wake command in background"
+                description = "Nex AI is active alongside device. Say 'Nex' to trigger."
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
@@ -139,8 +138,8 @@ class NexVoiceService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Nex AI Background Sentinel")
-            .setContentText("Protocols active. Say 'Nex' to wake.")
+            .setContentTitle("Nex AI • Active Companion")
+            .setContentText("All systems online. Say 'Nex' anytime.")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -150,7 +149,7 @@ class NexVoiceService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        isListeningLoopActive = false
+        isStandbyLoopActive = false
         speechRecognizer?.stopListening()
         speechRecognizer?.destroy()
         speechRecognizer = null
@@ -162,7 +161,7 @@ class NexVoiceService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
-        private const val NOTIFICATION_ID = 9001
-        private const val CHANNEL_ID = "nex_ai_sentinel_channel"
+        private const val NOTIFICATION_ID = 8801
+        private const val CHANNEL_ID = "nex_all_time_channel"
     }
 }
