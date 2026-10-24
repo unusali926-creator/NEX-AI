@@ -12,8 +12,10 @@ import android.speech.tts.TextToSpeech
 import java.util.Locale
 
 class VoiceManager(
-    private val context: Context,
-    private val onSpeechResult: ((String) -> Unit)? = null
+    val context: Context,
+    val prefs: PreferencesManager? = null,
+    var onSpeechResult: ((String) -> Unit)? = null,
+    var onError: ((String) -> Unit)? = null
 ) : TextToSpeech.OnInitListener {
 
     private var tts: TextToSpeech? = null
@@ -91,18 +93,30 @@ class VoiceManager(
         }
     }
 
-    // MainActivity ke calls ke liye Overloaded Listeners
+    // MainActivity ke 0-parameter call ke liye
+    fun startListening() {
+        startListening(
+            onResult = { result -> onSpeechResult?.invoke(result) },
+            onError = { err -> onError?.invoke(err) }
+        )
+    }
+
+    fun startListening(onResult: (String) -> Unit) {
+        startListening(onResult, onError)
+    }
+
     fun startListening(
         onResult: (String) -> Unit,
-        onError: ((String) -> Unit)? = null
+        onErrorCallback: ((String) -> Unit)?
     ) {
-        // Hamesha Main UI Thread par run karna zaroori hai
         mainHandler.post {
             try {
-                stopListening()
+                this@VoiceManager.stopListening()
 
                 if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-                    onError?.invoke("Device par Speech Engine available nahi hai")
+                    val err = "Device par Speech Engine available nahi hai"
+                    onErrorCallback?.invoke(err)
+                    onError?.invoke(err)
                     return@post
                 }
 
@@ -117,7 +131,6 @@ class VoiceManager(
                     putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                     
-                    // Timeouts badha diye gaye hain taaki turant cut na ho
                     putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 4000L)
                     putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
                     putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
@@ -132,13 +145,14 @@ class VoiceManager(
 
                     override fun onError(error: Int) {
                         val message = when (error) {
-                            SpeechRecognizer.ERROR_NO_MATCH -> "Aawaz saaf nahi aayi, dobara boliye Sir..."
+                            SpeechRecognizer.ERROR_NO_MATCH -> "Aawaz detect nahi hui, dobara boliye..."
                             SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Timeout. Boliye Sir..."
                             SpeechRecognizer.ERROR_AUDIO -> "Mic recording error"
                             SpeechRecognizer.ERROR_NETWORK -> "Network issue"
                             SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Mic permission missing"
                             else -> "Mic code: $error"
                         }
+                        onErrorCallback?.invoke(message)
                         onError?.invoke(message)
                     }
 
@@ -149,7 +163,9 @@ class VoiceManager(
                             onResult(spokenText)
                             onSpeechResult?.invoke(spokenText)
                         } else {
-                            onError?.invoke("Aawaz detect nahi hui")
+                            val err = "Aawaz detect nahi hui"
+                            onErrorCallback?.invoke(err)
+                            onError?.invoke(err)
                         }
                     }
 
@@ -159,34 +175,37 @@ class VoiceManager(
 
                 speechRecognizer?.startListening(intent)
             } catch (e: Exception) {
-                onError?.invoke("Mic crash error: ${e.message}")
+                val crashErr = "Mic error: ${e.message}"
+                onErrorCallback?.invoke(crashErr)
+                onError?.invoke(crashErr)
             }
         }
+    }
 
-        fun startListening(onResult: (String) -> Unit) {
-            startListening(onResult, null)
-        }
+    // MainActivity ke voiceManager.stop() ke liye
+    fun stop() {
+        stopListening()
+    }
 
-        fun stopListening() {
-            mainHandler.post {
-                try {
-                    speechRecognizer?.stopListening()
-                    speechRecognizer?.cancel()
-                    speechRecognizer?.destroy()
-                    speechRecognizer = null
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
+    fun stopListening() {
+        mainHandler.post {
+            try {
+                speechRecognizer?.stopListening()
+                speechRecognizer?.cancel()
+                speechRecognizer?.destroy()
+                speechRecognizer = null
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
+    }
 
-        fun destroy() {
-            stopListening()
-            mainHandler.post {
-                tts?.stop()
-                tts?.shutdown()
-                tts = null
-            }
+    fun destroy() {
+        stopListening()
+        mainHandler.post {
+            tts?.stop()
+            tts?.shutdown()
+            tts = null
         }
     }
 }
