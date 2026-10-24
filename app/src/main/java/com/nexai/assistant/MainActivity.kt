@@ -38,10 +38,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -84,7 +82,6 @@ class MainActivity : ComponentActivity() {
         chatHistoryManager = ChatHistoryManager(this)
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
 
-        // Pre-initialize Voice Engine immediately
         voiceManager = VoiceManager(
             context = this,
             prefs = prefs,
@@ -103,18 +100,15 @@ class MainActivity : ComponentActivity() {
             NexTheme {
                 MainMasterScreen(
                     prefs = prefs,
+                    voiceManager = voiceManager,
                     chatHistoryManager = chatHistoryManager,
                     isBottomHudActive = isBottomHudActive,
                     hudSpeakingState = hudSpeakingState,
                     hudText = hudText,
                     onCloseHud = { isBottomHudActive = false },
                     onVibrate = { triggerHaptic() },
-                    onTestAudio = {
-                        voiceManager.speak("Testing audio systems. Hello Sir, Nex speaker is fully operational!")
-                        Toast.makeText(this, "Testing Audio Speaker...", Toast.LENGTH_SHORT).show()
-                    },
                     onToggleMasterActive = { makeActive ->
-                        toggleMasterCore(makeActive)
+                        executeToggleCore(makeActive)
                     },
                     onOpenNotificationSettings = {
                         startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -144,17 +138,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun toggleMasterCore(makeActive: Boolean) {
+    private fun executeToggleCore(makeActive: Boolean) {
         prefs.isMasterActive = makeActive
-        deviceManager.toggleBackgroundSentinel(makeActive)
         triggerHaptic()
 
         if (makeActive) {
+            // Check microphone permission safely before starting any background service
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                deviceManager.toggleBackgroundSentinel(true)
+            }
             voiceManager.speak("Hello Sir! Nex is online and listening.")
-            Toast.makeText(this, "Nex AI: ACTIVE", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "NEX CORE: ACTIVE", Toast.LENGTH_SHORT).show()
         } else {
+            deviceManager.toggleBackgroundSentinel(false)
             voiceManager.speak("Nex entering standby mode, Sir.")
-            Toast.makeText(this, "Nex AI: INACTIVE", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "NEX CORE: STANDBY", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -181,7 +179,7 @@ class MainActivity : ComponentActivity() {
                     vibrator?.vibrate(35)
                 }
             } catch (e: Exception) {
-                // Ignore haptics
+                // Ignore
             }
         }
     }
@@ -197,13 +195,13 @@ class MainActivity : ComponentActivity() {
             result.onSuccess { rawReply ->
                 val finalMessage = when {
                     rawReply.startsWith("[ACTION:DEACTIVATE_CORE]") -> {
-                        toggleMasterCore(false)
+                        executeToggleCore(false)
                         "Nex deactivated, Sir. Call me anytime."
                     }
                     rawReply.startsWith("[ACTION:") -> {
                         val actionTag = rawReply.substringBefore("]") + "]"
                         val actionResult = deviceManager.executeAction(actionTag)
-                        actionResult ?: "Action executed, Sir."
+                        actionResult ?: "Action completed, Sir."
                     }
                     else -> rawReply
                 }
@@ -228,13 +226,13 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainMasterScreen(
     prefs: PreferencesManager,
+    voiceManager: VoiceManager,
     chatHistoryManager: ChatHistoryManager,
     isBottomHudActive: Boolean,
     hudSpeakingState: Boolean,
     hudText: String,
     onCloseHud: () -> Unit,
     onVibrate: () -> Unit,
-    onTestAudio: () -> Unit,
     onToggleMasterActive: (Boolean) -> Unit,
     onOpenNotificationSettings: () -> Unit,
     onSendMessage: (String, List<ChatMessage>, (String?, String?) -> Unit) -> Unit,
@@ -254,7 +252,7 @@ fun MainMasterScreen(
             in 17..21 -> "Good evening"
             else -> "Hello"
         }
-        return "$timeSalutation, ${prefs.ownerName}! Nex AI online hai. Mic dabakar boliye ya type karein. Aaj kya guidance chahiye?"
+        return "$timeSalutation, ${prefs.ownerName}! Nex AI online hai. Center button dabakar activate karein ya mic se baat karein."
     }
 
     var sessionsList by remember { mutableStateOf(chatHistoryManager.getAllSessions()) }
@@ -268,6 +266,17 @@ fun MainMasterScreen(
     var isThinking by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            isMasterActive = true
+            onToggleMasterActive(true)
+        } else {
+            Toast.makeText(context, "Microphone permission required for Nex AI", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     fun submitMessage(prompt: String) {
         val cleanPrompt = prompt.trim()
@@ -298,14 +307,6 @@ fun MainMasterScreen(
         }
     }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            onStartVoiceListening()
-        }
-    }
-
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -319,7 +320,7 @@ fun MainMasterScreen(
                         .padding(16.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        MiniArcReactor(isGlowing = isMasterActive)
+                        BigCircularArcReactor(isGlowing = isMasterActive, sizeDp = 42)
                         Spacer(modifier = Modifier.width(10.dp))
                         Text("Nex AI History", color = TextWhite, fontSize = 18.sp)
                     }
@@ -394,19 +395,19 @@ fun MainMasterScreen(
                     Divider(color = SurfaceAccent)
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(if (isMasterActive) "Core: ACTIVE" else "Core: STANDBY", color = AccentCyan, fontSize = 11.sp)
-                        IconButton(onClick = {
+                    // Settings Button Inside Drawer (Top-Right se hata diya gaya)
+                    Button(
+                        onClick = {
                             onVibrate()
                             showSettings = true
                             scope.launch { drawerState.close() }
-                        }) {
-                            Icon(Icons.Default.Settings, contentDescription = "Settings", tint = AccentCyan)
-                        }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceAccent),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = null, tint = AccentCyan)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("App Settings & Voices", color = TextWhite)
                     }
                 }
             }
@@ -416,37 +417,31 @@ fun MainMasterScreen(
             Scaffold(
                 topBar = {
                     TopAppBar(
+                        // Left side me Direct New Chat & History Drawer Action
                         navigationIcon = {
-                            IconButton(onClick = {
-                                onVibrate()
-                                scope.launch { drawerState.open() }
-                            }) {
-                                Icon(Icons.Default.Menu, contentDescription = "Drawer", tint = AccentCyan)
-                            }
-                        },
-                        title = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                MiniArcReactor(isGlowing = isMasterActive)
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column {
-                                    Text("Nex AI", color = TextWhite, fontSize = 18.sp)
-                                    Text(
-                                        if (isMasterActive) "ACTIVE COMPANION" else "STANDBY",
-                                        color = if (isMasterActive) Color(0xFF00F5D4) else TextMuted,
-                                        fontSize = 10.sp
-                                    )
+                                IconButton(onClick = {
+                                    onVibrate()
+                                    scope.launch { drawerState.open() }
+                                }) {
+                                    Icon(Icons.Default.Menu, contentDescription = "Drawer", tint = AccentCyan)
+                                }
+                                IconButton(onClick = {
+                                    onVibrate()
+                                    val newSess = chatHistoryManager.createNewSession(getDynamicGreeting())
+                                    activeSession = newSess
+                                    sessionsList = chatHistoryManager.getAllSessions()
+                                }) {
+                                    Icon(Icons.Default.Add, contentDescription = "New Chat", tint = AccentCyan)
                                 }
                             }
                         },
+                        title = {
+                            Text("Nex AI", color = TextWhite, fontSize = 18.sp)
+                        },
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = DeepCardNavy),
-                        actions = {
-                            IconButton(onClick = {
-                                onVibrate()
-                                showSettings = true
-                            }) {
-                                Icon(Icons.Default.Settings, contentDescription = "Settings", tint = AccentCyan)
-                            }
-                        }
+                        // Right side setting icon removed as requested!
+                        actions = {}
                     )
                 },
                 containerColor = DarkBlueBackground
@@ -456,81 +451,48 @@ fun MainMasterScreen(
                         .fillMaxSize()
                         .padding(innerPadding)
                 ) {
-                    // MASTER ACTIVE / INACTIVE POWER CORE BAR WITH TEST VOICE BUTTON
-                    Card(
+                    // CENTER GOL (CIRCULAR) ARC REACTOR BUTTON
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isMasterActive) Color(0xFF0E3A42) else DeepCardNavy
-                        ),
-                        shape = RoundedCornerShape(16.dp)
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable {
-                                            isMasterActive = !isMasterActive
-                                            onToggleMasterActive(isMasterActive)
-                                        },
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .clip(CircleShape)
-                                            .background(if (isMasterActive) AccentCyan else SurfaceAccent),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            Icons.Default.PowerSettingsNew,
-                                            contentDescription = "Core Toggle",
-                                            tint = if (isMasterActive) Color.Black else TextWhite
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
-                                        Text(
-                                            if (isMasterActive) "NEX: ACTIVE" else "NEX: INACTIVE",
-                                            color = TextWhite,
-                                            fontSize = 14.sp
-                                        )
-                                        Text(
-                                            if (isMasterActive) "Online & Listening" else "Tap switch to Activate",
-                                            color = if (isMasterActive) AccentCyan else TextMuted,
-                                            fontSize = 11.sp
-                                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .clickable {
+                                    onVibrate()
+                                    if (!isMasterActive) {
+                                        // Check permission safely before activating
+                                        if (ContextCompat.checkSelfPermission(
+                                                context,
+                                                Manifest.permission.RECORD_AUDIO
+                                            ) == PackageManager.PERMISSION_GRANTED
+                                        ) {
+                                            isMasterActive = true
+                                            onToggleMasterActive(true)
+                                        } else {
+                                            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        }
+                                    } else {
+                                        isMasterActive = false
+                                        onToggleMasterActive(false)
                                     }
                                 }
+                                .padding(8.dp)
+                        ) {
+                            // Large Circular Glowing Arc Reactor Button
+                            BigCircularArcReactor(isGlowing = isMasterActive, sizeDp = 90)
 
-                                Switch(
-                                    checked = isMasterActive,
-                                    onCheckedChange = { active ->
-                                        isMasterActive = active
-                                        onToggleMasterActive(active)
-                                    }
-                                )
-                            }
+                            Spacer(modifier = Modifier.height(8.dp))
 
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // Direct Test Audio Button
-                            Button(
-                                onClick = onTestAudio,
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.buttonColors(containerColor = SurfaceAccent),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Icon(Icons.Default.VolumeUp, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("🔊 Test Audio Speaker (Tap to verify sound)", color = TextWhite, fontSize = 12.sp)
-                            }
+                            Text(
+                                text = if (isMasterActive) "NEX ACTIVE (ONLINE)" else "TAP TO ACTIVATE NEX",
+                                color = if (isMasterActive) AccentCyan else TextMuted,
+                                fontSize = 13.sp,
+                                letterSpacing = 1.sp
+                            )
                         }
                     }
 
@@ -546,13 +508,13 @@ fun MainMasterScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(Icons.Default.Notifications, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                "Allow Notification Access (to ask 'Kaun message kiya?')",
+                                "Notification Access (Poochne ke liye: 'Kaun message kiya?')",
                                 color = TextWhite,
                                 fontSize = 11.sp,
                                 modifier = Modifier.weight(1f)
@@ -565,7 +527,7 @@ fun MainMasterScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
                         state = listState
                     ) {
                         items(activeSession.messages) { msg ->
@@ -575,7 +537,7 @@ fun MainMasterScreen(
                         if (isThinking) {
                             item {
                                 Text(
-                                    text = "Nex AI is thinking & speaking...",
+                                    text = "Nex AI is computing & speaking...",
                                     color = AccentCyan,
                                     fontSize = 12.sp,
                                     modifier = Modifier.padding(start = 8.dp, bottom = 8.dp)
@@ -612,7 +574,7 @@ fun MainMasterScreen(
                         TextField(
                             value = inputText,
                             onValueChange = { inputText = it },
-                            placeholder = { Text("Ask Nex (or ask 'Kaun message kiya?')...", color = TextMuted, fontSize = 12.sp) },
+                            placeholder = { Text("Command Nex (or ask 'Kaun message kiya?')...", color = TextMuted, fontSize = 12.sp) },
                             modifier = Modifier.weight(1f),
                             colors = TextFieldDefaults.colors(
                                 focusedContainerColor = Color.Transparent,
@@ -669,11 +631,11 @@ fun MainMasterScreen(
                             }
                         }
 
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        BigCircularArcReactor(isGlowing = true, sizeDp = 48)
+
                         Spacer(modifier = Modifier.height(10.dp))
-
-                        MiniArcReactor(isGlowing = true)
-
-                        Spacer(modifier = Modifier.height(12.dp))
 
                         Text(
                             text = hudText,
@@ -690,30 +652,32 @@ fun MainMasterScreen(
     if (showSettings) {
         MasterSettingsDialog(
             prefs = prefs,
+            voiceManager = voiceManager,
             onVibrate = onVibrate,
             onDismiss = { showSettings = false }
         )
     }
 }
 
+// Bada Gol (Circular) Glowing Arc Reactor Button
 @Composable
-fun MiniArcReactor(isGlowing: Boolean) {
+fun BigCircularArcReactor(isGlowing: Boolean, sizeDp: Int) {
     val infiniteTransition = rememberInfiniteTransition(label = "ArcPulse")
 
     val rotation by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = if (isGlowing) 2000 else 6000, easing = LinearEasing)
+            animation = tween(durationMillis = if (isGlowing) 2500 else 7000, easing = LinearEasing)
         ),
         label = "Rotation"
     )
 
     val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 0.85f,
-        targetValue = 1.15f,
+        initialValue = 0.88f,
+        targetValue = 1.12f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = if (isGlowing) 400 else 1400, easing = FastOutSlowInEasing),
+            animation = tween(durationMillis = if (isGlowing) 450 else 1600, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "Pulse"
@@ -721,7 +685,7 @@ fun MiniArcReactor(isGlowing: Boolean) {
 
     Box(
         modifier = Modifier
-            .size(38.dp)
+            .size(sizeDp.dp)
             .padding(2.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -729,43 +693,46 @@ fun MiniArcReactor(isGlowing: Boolean) {
             val center = Offset(size.width / 2, size.height / 2)
             val outerRadius = size.minDimension / 2 - 2
 
+            // Glowing Outer Ring
             drawCircle(
-                color = Color(0xFF00F5D4),
+                color = if (isGlowing) Color(0xFF00F5D4) else Color(0xFF3A506B),
                 radius = outerRadius,
                 center = center,
-                style = Stroke(width = 2.dp.toPx())
+                style = Stroke(width = 3.dp.toPx())
             )
 
+            // Inner Rotating Segments
             rotate(rotation, center) {
                 drawCircle(
-                    color = Color(0xFF5BC0BE),
-                    radius = outerRadius * 0.7f,
+                    color = if (isGlowing) Color(0xFF5BC0BE) else Color(0xFF1C2541),
+                    radius = outerRadius * 0.72f,
                     center = center,
-                    style = Stroke(width = 1.5.dp.toPx())
+                    style = Stroke(width = 2.dp.toPx())
                 )
                 drawLine(
-                    color = Color(0xFF00F5D4),
+                    color = if (isGlowing) Color(0xFF00F5D4) else Color(0xFF3A506B),
                     start = center,
-                    end = Offset(center.x, center.y - outerRadius * 0.7f),
+                    end = Offset(center.x, center.y - outerRadius * 0.72f),
                     strokeWidth = 2.dp.toPx()
                 )
                 drawLine(
-                    color = Color(0xFF00F5D4),
+                    color = if (isGlowing) Color(0xFF00F5D4) else Color(0xFF3A506B),
                     start = center,
-                    end = Offset(center.x - outerRadius * 0.6f, center.y + outerRadius * 0.4f),
+                    end = Offset(center.x - outerRadius * 0.62f, center.y + outerRadius * 0.42f),
                     strokeWidth = 2.dp.toPx()
                 )
                 drawLine(
-                    color = Color(0xFF00F5D4),
+                    color = if (isGlowing) Color(0xFF00F5D4) else Color(0xFF3A506B),
                     start = center,
-                    end = Offset(center.x + outerRadius * 0.6f, center.y + outerRadius * 0.4f),
+                    end = Offset(center.x + outerRadius * 0.62f, center.y + outerRadius * 0.42f),
                     strokeWidth = 2.dp.toPx()
                 )
             }
 
+            // Pulsing Center Core
             drawCircle(
-                color = Color.White,
-                radius = (outerRadius * 0.28f) * pulseScale,
+                color = if (isGlowing) Color.White else Color(0xFF5BC0BE),
+                radius = (outerRadius * 0.30f) * pulseScale,
                 center = center
             )
         }
@@ -811,9 +778,11 @@ fun ChatBubble(message: ChatMessage) {
     }
 }
 
+// Improved Settings Panel with Live Voice Preview
 @Composable
 fun MasterSettingsDialog(
     prefs: PreferencesManager,
+    voiceManager: VoiceManager,
     onVibrate: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -831,9 +800,9 @@ fun MasterSettingsDialog(
         containerColor = DeepCardNavy,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Nex AI Controls", color = TextWhite, fontSize = 18.sp)
+                Text("Nex Settings & Voices", color = TextWhite, fontSize = 18.sp)
                 Spacer(modifier = Modifier.weight(1f))
-                Text("v3.8 Final", color = AccentCyan, fontSize = 11.sp)
+                Text("v4.0 Pro", color = AccentCyan, fontSize = 11.sp)
             }
         },
         text = {
@@ -843,16 +812,20 @@ fun MasterSettingsDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Text("Response Language", color = AccentCyan, fontSize = 13.sp)
+                // Voice Selector with LIVE SOUND PREVIEW
+                Text("Select Voice Profile (Tap to hear sample)", color = AccentCyan, fontSize = 13.sp)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(languages) { lang ->
+                    items(voices) { v ->
                         FilterChip(
-                            selected = selectedLanguage == lang,
+                            selected = selectedVoice == v,
                             onClick = {
                                 onVibrate()
-                                selectedLanguage = lang
+                                selectedVoice = v
+                                prefs.voiceStyle = v
+                                // Immediately speak preview sample so user hears the voice!
+                                voiceManager.speak("Hello Sir, this is $v voice profile.")
                             },
-                            label = { Text(lang) },
+                            label = { Text(v) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = AccentCyan,
                                 selectedLabelColor = Color.Black,
@@ -865,16 +838,16 @@ fun MasterSettingsDialog(
 
                 Divider(color = SurfaceAccent)
 
-                Text("Voice Profile", color = AccentCyan, fontSize = 13.sp)
+                Text("Response Language", color = AccentCyan, fontSize = 13.sp)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(voices) { v ->
+                    items(languages) { lang ->
                         FilterChip(
-                            selected = selectedVoice == v,
+                            selected = selectedLanguage == lang,
                             onClick = {
                                 onVibrate()
-                                selectedVoice = v
+                                selectedLanguage = lang
                             },
-                            label = { Text(v) },
+                            label = { Text(lang) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = AccentCyan,
                                 selectedLabelColor = Color.Black,
@@ -914,7 +887,7 @@ fun MasterSettingsDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Voice Spoken Responses", color = TextWhite)
+                    Text("Voice Spoken Feedback", color = TextWhite)
                     Switch(
                         checked = ttsEnabled,
                         onCheckedChange = {
@@ -937,12 +910,12 @@ fun MasterSettingsDialog(
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = AccentCyan)
             ) {
-                Text("Apply", color = Color.Black)
+                Text("Save", color = Color.Black)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Dismiss", color = TextWhite)
+                Text("Close", color = TextWhite)
             }
         }
     )
