@@ -3,6 +3,7 @@ package com.nexai.assistant
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
@@ -51,6 +52,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -66,6 +68,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var voiceManager: VoiceManager
     private var vibrator: Vibrator? = null
 
+    // Callbacks for live voice queries
+    private var activeVoiceQueryHandler: ((String) -> Unit)? = null
+
     // State for bottom-center HUD
     var isBottomHudActive by mutableStateOf(false)
     var hudSpeakingState by mutableStateOf(false)
@@ -78,6 +83,19 @@ class MainActivity : ComponentActivity() {
         deviceManager = DeviceManager(this)
         chatHistoryManager = ChatHistoryManager(this)
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+
+        // Pre-initialize VoiceManager so speech engine is immediately ready
+        voiceManager = VoiceManager(
+            context = this,
+            prefs = prefs,
+            onSpeechResult = { spokenText ->
+                activeVoiceQueryHandler?.invoke(spokenText)
+            },
+            onError = { err ->
+                hudText = err
+                Toast.makeText(this, err, Toast.LENGTH_SHORT).show()
+            }
+        )
 
         handleWakeUpIntent(intent)
 
@@ -100,8 +118,11 @@ class MainActivity : ComponentActivity() {
                     onSendMessage = { query, history, onComplete ->
                         handleQuery(query, history, onComplete)
                     },
-                    onStartVoice = { onVoiceRecognized ->
-                        startVoiceListening(onVoiceRecognized)
+                    onBindVoiceHandler = { handler ->
+                        activeVoiceQueryHandler = handler
+                    },
+                    onStartVoiceListening = {
+                        startListeningSafe()
                     }
                 )
             }
@@ -125,18 +146,10 @@ class MainActivity : ComponentActivity() {
         triggerHaptic()
 
         if (makeActive) {
-            voiceManager = VoiceManager(
-                context = this,
-                prefs = prefs,
-                onSpeechResult = {},
-                onError = {}
-            )
             voiceManager.speak("Hello Sir! Nex is online and listening.")
             Toast.makeText(this, "Nex AI: ACTIVE (Listening for 'Nex')", Toast.LENGTH_SHORT).show()
         } else {
-            if (::voiceManager.isInitialized) {
-                voiceManager.speak("Nex entering standby, Sir.")
-            }
+            voiceManager.speak("Nex entering standby, Sir.")
             Toast.makeText(this, "Nex AI: INACTIVE (Standby)", Toast.LENGTH_SHORT).show()
         }
     }
@@ -145,16 +158,12 @@ class MainActivity : ComponentActivity() {
         isBottomHudActive = true
         hudSpeakingState = false
         hudText = "Listening to ${prefs.ownerName}..."
-        startVoiceListening { spokenText ->
-            hudSpeakingState = true
-            hudText = "Processing: $spokenText"
-            handleQuery(spokenText, emptyList()) { reply, _ ->
-                hudText = reply ?: "Systems ready, Sir."
-                CoroutineScope(Dispatchers.Main).launch {
-                    delay(3500)
-                    isBottomHudActive = false
-                }
-            }
+        startListeningSafe()
+    }
+
+    fun startListeningSafe() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            voiceManager.startListening()
         }
     }
 
@@ -173,20 +182,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun startVoiceListening(onVoiceRecognized: (String) -> Unit) {
-        voiceManager = VoiceManager(
-            context = this,
-            prefs = prefs,
-            onSpeechResult = onVoiceRecognized,
-            onError = { err ->
-                hudText = err
-                Toast.makeText(this, err, Toast.LENGTH_SHORT).show()
-            }
-        )
-        voiceManager.startListening()
-    }
-
-    private fun handleQuery(
+    fun handleQuery(
         query: String,
         history: List<ChatMessage>,
         onComplete: (String?, String?) -> Unit
@@ -209,9 +205,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 if (prefs.isTtsEnabled) {
-                    if (::voiceManager.isInitialized) {
-                        voiceManager.speak(finalMessage)
-                    }
+                    voiceManager.speak(finalMessage)
                 }
                 onComplete(finalMessage, null)
             }.onFailure { err ->
@@ -222,9 +216,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        if (::voiceManager.isInitialized) {
-            voiceManager.stop()
-        }
+        voiceManager.stop()
     }
 }
 
@@ -241,7 +233,8 @@ fun MainMasterScreen(
     onToggleMasterActive: (Boolean) -> Unit,
     onOpenNotificationSettings: () -> Unit,
     onSendMessage: (String, List<ChatMessage>, (String?, String?) -> Unit) -> Unit,
-    onStartVoice: ((String) -> Unit) -> Unit
+    onBindVoiceHandler: (((String) -> Unit)) -> Unit,
+    onStartVoiceListening: () -> Unit
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -270,13 +263,42 @@ fun MainMasterScreen(
     var showSettings by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
+    // Helper to send query and auto-reply
+    fun submitMessage(prompt: String) {
+        val cleanPrompt = prompt.trim()
+        if (cleanPrompt.isNotBlank() && !isThinking) {
+            onVibrate()
+            activeSession.messages.add(ChatMessage(sender = Sender.USER, text = cleanPrompt))
+            inputText = ""
+            isThinking = true
+            chatHistoryManager.saveSession(activeSession)
+            scope.launch { listState.animateScrollToItem(activeSession.messages.size - 1) }
+
+            onSendMessage(cleanPrompt, activeSession.messages) { reply, error ->
+                isThinking = false
+                if (reply != null) {
+                    activeSession.messages.add(ChatMessage(sender = Sender.NEX, text = reply))
+                    chatHistoryManager.saveSession(activeSession)
+                } else {
+                    activeSession.messages.add(ChatMessage(sender = Sender.SYSTEM, text = "⚠️ $error"))
+                }
+                scope.launch { listState.animateScrollToItem(activeSession.messages.size - 1) }
+            }
+        }
+    }
+
+    // Bind incoming voice recognition directly to auto-submit!
+    LaunchedEffect(Unit) {
+        onBindVoiceHandler { recognizedSpeech ->
+            submitMessage(recognizedSpeech)
+        }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            onStartVoice { voiceQuery ->
-                inputText = voiceQuery
-            }
+            onStartVoiceListening()
         }
     }
 
@@ -473,7 +495,7 @@ fun MainMasterScreen(
                                         fontSize = 14.sp
                                     )
                                     Text(
-                                        if (isMasterActive) "Always listening • Say 'Nex'" else "Tap to turn ON All-Time Companion",
+                                        if (isMasterActive) "Listening • Say 'Nex' anytime" else "Tap to turn ON All-Time Companion",
                                         color = if (isMasterActive) AccentCyan else TextMuted,
                                         fontSize = 11.sp
                                     )
@@ -530,7 +552,7 @@ fun MainMasterScreen(
                         if (isThinking) {
                             item {
                                 Text(
-                                    text = "Nex AI is thinking & analyzing...",
+                                    text = "Nex AI is thinking & speaking...",
                                     color = AccentCyan,
                                     fontSize = 12.sp,
                                     modifier = Modifier.padding(start = 8.dp, bottom = 8.dp)
@@ -574,26 +596,7 @@ fun MainMasterScreen(
 
                         IconButton(
                             onClick = {
-                                val prompt = inputText.trim()
-                                if (prompt.isNotBlank() && !isThinking) {
-                                    onVibrate()
-                                    activeSession.messages.add(ChatMessage(sender = Sender.USER, text = prompt))
-                                    inputText = ""
-                                    isThinking = true
-                                    chatHistoryManager.saveSession(activeSession)
-                                    scope.launch { listState.animateScrollToItem(activeSession.messages.size - 1) }
-
-                                    onSendMessage(prompt, activeSession.messages) { reply, error ->
-                                        isThinking = false
-                                        if (reply != null) {
-                                            activeSession.messages.add(ChatMessage(sender = Sender.NEX, text = reply))
-                                            chatHistoryManager.saveSession(activeSession)
-                                        } else {
-                                            activeSession.messages.add(ChatMessage(sender = Sender.SYSTEM, text = "⚠️ $error"))
-                                        }
-                                        scope.launch { listState.animateScrollToItem(activeSession.messages.size - 1) }
-                                    }
-                                }
+                                submitMessage(inputText)
                             }
                         ) {
                             Icon(Icons.Default.Send, contentDescription = "Send", tint = AccentCyan)
@@ -602,7 +605,7 @@ fun MainMasterScreen(
                 }
             }
 
-            // FLOATING BOTTOM-CENTER HUD INTERFACE (Appears when 'Nex' is spoken or voice active)
+            // FLOATING BOTTOM-CENTER HUD INTERFACE
             AnimatedVisibility(
                 visible = isBottomHudActive,
                 enter = slideInVertically(initialOffsetY = { it }),
@@ -801,7 +804,7 @@ fun MasterSettingsDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Nex AI Controls", color = TextWhite, fontSize = 18.sp)
                 Spacer(modifier = Modifier.weight(1f))
-                Text("v3.5 Final", color = AccentCyan, fontSize = 11.sp)
+                Text("v3.6 Pro", color = AccentCyan, fontSize = 11.sp)
             }
         },
         text = {
