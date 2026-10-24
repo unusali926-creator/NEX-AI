@@ -40,7 +40,7 @@
         android:allowBackup="true"
         android:label="Nex AI"
         android:icon="@drawable/my_logo"
-android:roundIcon="@drawable/my_logo"
+        android:roundIcon="@drawable/my_logo"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
