@@ -2,215 +2,91 @@ package com.nexai.assistant
 
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
-import android.content.pm.PackageManager
-import android.content.pm.ResolveInfo
-import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
-import android.net.Uri
 import android.os.BatteryManager
-import android.os.Build
-import android.provider.AlarmClock
-import android.provider.Settings
-import android.util.Log
-import java.util.Locale
+import android.provider.MediaStore
 
 class DeviceManager(private val context: Context) {
 
-    private val TAG = "NexDeviceManager"
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    private var cameraId: String? = null
 
-    init {
+    fun executeAction(actionTag: String?): String? {
+        if (actionTag == null) return null
+
+        return when (actionTag) {
+            "[ACTION:FLASHLIGHT_ON]" -> {
+                setFlashlight(true)
+                "Flashlight activated, Sir."
+            }
+            "[ACTION:FLASHLIGHT_OFF]" -> {
+                setFlashlight(false)
+                "Flashlight deactivated, Sir."
+            }
+            "[ACTION:BATTERY]" -> {
+                val level = getBatteryPercentage()
+                "Sir, battery is currently at $level percent."
+            }
+            "[ACTION:VOLUME_MAX]" -> {
+                setMaxVolume()
+                "Audio levels at maximum, Sir."
+            }
+            "[ACTION:VOLUME_MUTE]" -> {
+                muteVolume()
+                "Audio output muted, Sir."
+            }
+            "[ACTION:OPEN_WHATSAPP]" -> {
+                launchApp("com.whatsapp")
+                "Opening WhatsApp, Sir."
+            }
+            "[ACTION:OPEN_YOUTUBE]" -> {
+                launchApp("com.google.android.youtube")
+                "Opening YouTube, Sir."
+            }
+            "[ACTION:OPEN_CAMERA]" -> {
+                openCamera()
+                "Camera active, Sir."
+            }
+            else -> null
+        }
+    }
+
+    private fun setFlashlight(status: Boolean) {
         try {
-            cameraId = cameraManager.cameraIdList.firstOrNull()
+            val cameraId = cameraManager.cameraIdList[0]
+            cameraManager.setTorchMode(cameraId, status)
         } catch (e: Exception) {
-            Log.e(TAG, "Camera init error: ${e.message}")
+            e.printStackTrace()
         }
     }
 
-    // =========================================================================
-    // 📲 1. DYNAMIC ANY-APP LAUNCHER
-    // =========================================================================
-    fun launchAnyApp(rawAppName: String): String {
-        val cleanName = rawAppName.lowercase(Locale.ROOT)
-            .replace(Regex("(kholo|open|chalao|start|app|karo|bhai|please)"), "")
-            .trim()
-
-        if (cleanName.isEmpty()) {
-            return "Sir, kis app ko open karna hai uska naam batayein."
-        }
-
-        val pm: PackageManager = context.packageManager
-        val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
-            addCategory(Intent.CATEGORY_LAUNCHER)
-        }
-
-        val installedApps: List<ResolveInfo> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            pm.queryIntentActivities(mainIntent, PackageManager.ResolveInfoFlags.of(0.toLong()))
-        } else {
-            @Suppress("DEPRECATION")
-            pm.queryIntentActivities(mainIntent, 0)
-        }
-
-        var matchedPackage: String? = null
-        var matchedAppName: String? = null
-
-        // 1st Priority: Exact or partial label match
-        for (info in installedApps) {
-            val label = info.loadLabel(pm).toString().lowercase(Locale.ROOT)
-            if (label == cleanName || label.contains(cleanName) || cleanName.contains(label)) {
-                matchedPackage = info.activityInfo.packageName
-                matchedAppName = info.loadLabel(pm).toString()
-                break
-            }
-        }
-
-        // 2nd Priority: Package name fallback
-        if (matchedPackage == null) {
-            for (info in installedApps) {
-                val pkgName = info.activityInfo.packageName.lowercase(Locale.ROOT)
-                if (pkgName.contains(cleanName)) {
-                    matchedPackage = info.activityInfo.packageName
-                    matchedAppName = info.loadLabel(pm).toString()
-                    break
-                }
-            }
-        }
-
-        return if (matchedPackage != null) {
-            try {
-                val launchIntent = pm.getLaunchIntentForPackage(matchedPackage)
-                if (launchIntent != null) {
-                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(launchIntent)
-                    "Opening $matchedAppName, Sir."
-                } else {
-                    "App open karne me dikkat aayi, Sir."
-                }
-            } catch (e: Exception) {
-                "Error launching app: ${e.message}"
-            }
-        } else {
-            "Sir, phone me '$cleanName' app nahi mila."
-        }
+    fun getBatteryPercentage(): Int {
+        val bm = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+        return bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
     }
 
-
-    // =========================================================================
-    // 🔦 2. HARDWARE TOGGLES (Torch, Volume, Battery, Wi-Fi, BT)
-    // =========================================================================
-
-    fun toggleTorch(state: Boolean): String {
-        return try {
-            cameraId?.let { id ->
-                cameraManager.setTorchMode(id, state)
-                if (state) "Flashlight turned ON, Sir." else "Flashlight turned OFF, Sir."
-            } ?: "Flashlight hardware nahi mila."
-        } catch (e: CameraAccessException) {
-            "Camera permission ya hardware error: ${e.message}"
-        } catch (e: Exception) {
-            "Unable to toggle flashlight."
-        }
+    private fun setMaxVolume() {
+        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, AudioManager.FLAG_SHOW_UI)
     }
 
-    fun setVolumeMax(): String {
-        return try {
-            val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, AudioManager.FLAG_SHOW_UI)
-            "Media volume maximum par set kar diya hai, Sir."
-        } catch (e: Exception) {
-            "Volume change nahi ho paya."
-        }
+    private fun muteVolume() {
+        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, AudioManager.FLAG_SHOW_UI)
     }
 
-    fun setVolumeMute(): String {
-        return try {
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, AudioManager.FLAG_SHOW_UI)
-            audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
-            "Device ko Silent aur Mute kar diya hai, Sir."
-        } catch (e: Exception) {
-            "Mute karne me error aaya."
-        }
-    }
-
-    fun getBatteryReport(): String {
-        return try {
-            val batteryFilter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-            val batteryStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.registerReceiver(null, batteryFilter, Context.RECEIVER_NOT_EXPORTED)
-            } else {
-                context.registerReceiver(null, batteryFilter)
-            }
-
-            val level = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
-            val scale = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
-            val percentage = if (level >= 0 && scale > 0) (level * 100) / scale else 0
-
-            val status = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-            val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
-                             status == BatteryManager.BATTERY_STATUS_FULL
-
-            val chargeState = if (isCharging) "charger connected hai" else "battery mode par hai"
-            "Sir, battery level $percentage% hai aur device abhi $chargeState."
-        } catch (e: Exception) {
-            Log.e(TAG, "Battery error: ${e.message}")
-            "Battery status read karne me error aaya."
-        }
-    }
-
-    fun openWifiSettings(): String {
-        return try {
-            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                Intent(Settings.Panel.ACTION_WIFI)
-            } else {
-                Intent(Settings.ACTION_WIFI_SETTINGS)
-            }.apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
+    private fun launchApp(packageName: String) {
+        val intent = context.packageManager.getLaunchIntentForPackage(packageName)
+        if (intent != null) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(intent)
-            "Opening Wi-Fi settings, Sir."
-        } catch (e: Exception) {
-            "Unable to open Wi-Fi settings."
         }
     }
 
-    fun openBluetoothSettings(): String {
-        return try {
-            val intent = Intent(Settings.ACTION_BLUETOOTH_SETTINGS).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
-            "Opening Bluetooth settings, Sir."
-        } catch (e: Exception) {
-            "Unable to open Bluetooth settings."
-        }
-    }
-
-
-    // =========================================================================
-    // ⏰ 3. DIALPAD & ALARMS
-    // =========================================================================
-    fun openDialpad(number: String = ""): String {
-        val intent = Intent(Intent.ACTION_DIAL).apply {
-            data = Uri.parse("tel:$number")
+    private fun openCamera() {
+        val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
-        return "Opening dialpad, Sir."
-    }
-
-    fn setQuickAlarm(hour: Int, minutes: Int, message: String): String {
-        val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
-            putExtra(AlarmClock.EXTRA_HOUR, hour)
-            putExtra(AlarmClock.EXTRA_MINUTES, minutes)
-            putExtra(AlarmClock.EXTRA_MESSAGE, message)
-            putExtra(AlarmClock.EXTRA_SKIP_UI, true)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(intent)
-        return "Alarm set for $hour:$minutes, Sir."
     }
 }
