@@ -40,9 +40,10 @@ class VoiceManager(
         if (status == TextToSpeech.SUCCESS) {
             isTtsReady = true
             
-            // Professional British JARVIS Voice setup
+            // Professional British JARVIS Voice setup (Null-safe check)
             val ukLocale = Locale.UK
-            if (tts?.isLanguageAvailable(ukLocale) >= TextToSpeech.LANG_AVAILABLE) {
+            val langAvailable = tts?.isLanguageAvailable(ukLocale) ?: TextToSpeech.LANG_NOT_SUPPORTED
+            if (langAvailable >= TextToSpeech.LANG_AVAILABLE) {
                 tts?.language = ukLocale
             } else {
                 tts?.language = Locale.ENGLISH
@@ -55,14 +56,10 @@ class VoiceManager(
             // Echo & Mic Clash Protection
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
-                    // Jab Nex bol raha ho, mic ko band rakho taaki Mic Recording Error na aaye
                     this@VoiceManager.stopListening()
                 }
 
-                override fun onDone(utteranceId: String?) {
-                    // Bolna khatam hone ke baad hi safe rahega
-                }
-
+                override fun onDone(utteranceId: String?) {}
                 override fun onError(utteranceId: String?) {}
             })
 
@@ -87,7 +84,6 @@ class VoiceManager(
         }
     }
 
-    // 0-parameter call
     fun startListening() {
         if (isSleeping) return
         startListeningInternal(
@@ -96,13 +92,11 @@ class VoiceManager(
         )
     }
 
-    // 1-parameter call
     fun startListening(onResult: (String) -> Unit) {
         if (isSleeping) return
         startListeningInternal(onResult, onError)
     }
 
-    // 2-parameters call
     fun startListening(
         onResult: (String) -> Unit,
         onErrorCallback: ((String) -> Unit)?
@@ -135,8 +129,7 @@ class VoiceManager(
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
                     
-                    // ULTRA-FAST LATENCY TIMEOUTS:
-                    // 1 second silence hote hi turant AI ko bhejega (No delay!)
+                    // Fast timing: 1 second silence hote hi process karega
                     putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1500L)
                     putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
                     putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
@@ -177,7 +170,6 @@ class VoiceManager(
         }
     }
 
-    // Sleep Mode / Off function
     fun enterSleepMode() {
         isSleeping = true
         stopListening()
