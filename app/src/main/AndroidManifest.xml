@@ -5,18 +5,17 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- Background Wake-Up & Notification Permissions -->
+    <!-- All-Time Background & Wake-Up Permissions -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- Hardware & Phone Control Permissions -->
-    <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Hardware Controls -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
 
     <!-- App launch queries -->
@@ -39,8 +38,8 @@
     <application
         android:allowBackup="true"
         android:label="Nex AI"
-        android:icon="@drawable/my_logo"
-        android:roundIcon="@drawable/my_logo"
+        android:icon="@drawable/ic_nex_logo"
+        android:roundIcon="@drawable/ic_nex_logo"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
@@ -55,12 +54,22 @@
             </intent-filter>
         </activity>
 
-        <!-- Background Voice Service for 'Nex' Wake-Up -->
+        <!-- Background Voice Standby Service -->
         <service
             android:name=".NexVoiceService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- Notification Listener Service (Kaun Message Kiya Read Karne Ke Liye) -->
+        <service
+            android:name=".NexNotificationListenerService"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
     </application>
 </manifest>
