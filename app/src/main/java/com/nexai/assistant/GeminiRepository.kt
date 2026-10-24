@@ -15,11 +15,15 @@ class GeminiRepository(
 ) {
 
     private val systemPrompt = """
-        You are Nex AI, a next-generation JARVIS assistant for Tony Stark standards.
-        Always call the user 'Sir'. Keep responses concise (1-2 sentences), sharp, and witty.
-        Languages: English, Hindi, Hinglish, Urdu, Bengali, Punjabi.
+        You are J.A.R.V.I.S. (Nex AI), Tony Stark's personal hyper-intelligent AI assistant.
+        Always address the user politely as 'Sir'. 
+        Give extremely concise, crisp, and direct replies (maximum 1 short sentence). 
+        Sound calm, sophisticated, and British.
         
-        CRITICAL HARDWARE ACTION TAGS:
+        CRITICAL HARDWARE TAGS:
+        - Turn off/Sleep mode/Band ho jao/Go to sleep: [ACTION:SLEEP_MODE]
+        - Read incoming message / Kaun message kiya: [ACTION:READ_NOTIFICATION]
+        - Current time / kitne baje hain: [ACTION:TIME]
         - Turn on flashlight: [ACTION:FLASHLIGHT_ON]
         - Turn off flashlight: [ACTION:FLASHLIGHT_OFF]
         - Check battery: [ACTION:BATTERY]
@@ -33,11 +37,7 @@ class GeminiRepository(
         userMessage: String
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val activeKey = if (groqApiKey.isNotBlank() && groqApiKey != "APNI_KEY_YAHAN_DALO") {
-                groqApiKey
-            } else {
-                ""
-            }
+            val activeKey = groqApiKey.trim()
 
             if (activeKey.isNotBlank()) {
                 val groqReply = callGroq(activeKey, userMessage)
@@ -62,12 +62,13 @@ class GeminiRepository(
             conn.requestMethod = "POST"
             conn.setRequestProperty("Authorization", "Bearer $apiKey")
             conn.setRequestProperty("Content-Type", "application/json")
-            conn.connectTimeout = 15000
-            conn.readTimeout = 20000
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
             conn.doOutput = true
 
+            // llama-3.1-8b-instant gives 200ms ultra-fast replies!
             val jsonPayload = JSONObject().apply {
-                put("model", "llama-3.3-70b-versatile")
+                put("model", "llama-3.1-8b-instant")
                 put("messages", JSONArray().apply {
                     put(JSONObject().apply {
                         put("role", "system")
@@ -78,7 +79,8 @@ class GeminiRepository(
                         put("content", message)
                     })
                 })
-                put("max_tokens", 150)
+                put("max_tokens", 80)
+                put("temperature", 0.5)
             }
 
             OutputStreamWriter(conn.outputStream).use { writer ->
@@ -108,8 +110,8 @@ class GeminiRepository(
             val url = URL("https://text.pollinations.ai/$encodedPrompt")
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
-            conn.connectTimeout = 15000
-            conn.readTimeout = 20000
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
 
             if (conn.responseCode == 200) {
                 conn.inputStream.bufferedReader().use { it.readText() }
@@ -117,7 +119,7 @@ class GeminiRepository(
                 "Online and standing by, Sir."
             }
         } catch (e: Exception) {
-            "Sir, satellite link is weak. Core systems active."
+            "Sir, satellite link is weak."
         }
     }
 }
