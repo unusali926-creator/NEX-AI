@@ -5,6 +5,7 @@ import android.content.Intent
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.os.BatteryManager
+import android.os.Build
 import android.provider.MediaStore
 
 class DeviceManager(private val context: Context) {
@@ -12,39 +13,60 @@ class DeviceManager(private val context: Context) {
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
+    // Master Core UI Power Switch ke liye
+    fun toggleBackgroundSentinel(enabled: Boolean = true): Boolean {
+        try {
+            val intent = Intent(context, NexVoiceService::class.java)
+            if (enabled) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } else {
+                context.stopService(intent)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return enabled
+    }
+
+    fun toggleBackgroundSentinel(): Boolean = toggleBackgroundSentinel(true)
+
     fun executeAction(actionTag: String?): String? {
         if (actionTag == null) return null
 
-        return when (actionTag) {
-            "[ACTION:FLASHLIGHT_ON]" -> {
+        return when {
+            actionTag.contains("FLASHLIGHT_ON") -> {
                 setFlashlight(true)
                 "Flashlight activated, Sir."
             }
-            "[ACTION:FLASHLIGHT_OFF]" -> {
+            actionTag.contains("FLASHLIGHT_OFF") -> {
                 setFlashlight(false)
                 "Flashlight deactivated, Sir."
             }
-            "[ACTION:BATTERY]" -> {
+            actionTag.contains("BATTERY") -> {
                 val level = getBatteryPercentage()
                 "Sir, battery is currently at $level percent."
             }
-            "[ACTION:VOLUME_MAX]" -> {
+            actionTag.contains("VOLUME_MAX") -> {
                 setMaxVolume()
-                "Audio levels at maximum, Sir."
+                "Audio levels set to maximum, Sir."
             }
-            "[ACTION:VOLUME_MUTE]" -> {
+            actionTag.contains("VOLUME_MUTE") -> {
                 muteVolume()
                 "Audio output muted, Sir."
             }
-            "[ACTION:OPEN_WHATSAPP]" -> {
+            actionTag.contains("OPEN_WHATSAPP") -> {
                 launchApp("com.whatsapp")
                 "Opening WhatsApp, Sir."
             }
-            "[ACTION:OPEN_YOUTUBE]" -> {
+            actionTag.contains("OPEN_YOUTUBE") -> {
                 launchApp("com.google.android.youtube")
                 "Opening YouTube, Sir."
             }
-            "[ACTION:OPEN_CAMERA]" -> {
+            actionTag.contains("OPEN_CAMERA") -> {
                 openCamera()
                 "Camera active, Sir."
             }
