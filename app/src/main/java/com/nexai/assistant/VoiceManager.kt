@@ -40,25 +40,23 @@ class VoiceManager(
         if (status == TextToSpeech.SUCCESS) {
             isTtsReady = true
             
-            // Professional British JARVIS Voice setup (Null-safe check)
+            // Professional British JARVIS Voice setup
             val ukLocale = Locale.UK
-            val langAvailable = tts?.isLanguageAvailable(ukLocale) ?: TextToSpeech.LANG_NOT_SUPPORTED
-            if (langAvailable >= TextToSpeech.LANG_AVAILABLE) {
+            val available = tts?.isLanguageAvailable(ukLocale) ?: TextToSpeech.LANG_NOT_SUPPORTED
+            if (available >= TextToSpeech.LANG_AVAILABLE) {
                 tts?.language = ukLocale
             } else {
                 tts?.language = Locale.ENGLISH
             }
 
-            // JARVIS Signature Cadence (Dheemi, serious aur crisp tone)
             tts?.setPitch(0.85f)
-            tts?.setSpeechRate(1.02f)
+            tts?.setSpeechRate(1.0f)
 
-            // Echo & Mic Clash Protection
+            // Echo protection: Mic stops while TTS is speaking
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
                     this@VoiceManager.stopListening()
                 }
-
                 override fun onDone(utteranceId: String?) {}
                 override fun onError(utteranceId: String?) {}
             })
@@ -129,10 +127,10 @@ class VoiceManager(
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
                     
-                    // Fast timing: 1 second silence hote hi process karega
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1500L)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
+                    // Balanced 2-Second Silence Detection (No accidental cuts!)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 2000L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1800L)
                 }
 
                 speechRecognizer?.setRecognitionListener(object : RecognitionListener {
@@ -143,11 +141,9 @@ class VoiceManager(
                     override fun onEndOfSpeech() {}
 
                     override fun onError(error: Int) {
-                        if (error != SpeechRecognizer.ERROR_NO_MATCH && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                            val err = "Mic error code: $error"
-                            onErrorCallback?.invoke(err)
-                            onError?.invoke(err)
-                        }
+                        val err = "Mic error code: $error"
+                        onErrorCallback?.invoke(err)
+                        onError?.invoke(err)
                     }
 
                     override fun onResults(results: Bundle?) {
@@ -173,12 +169,12 @@ class VoiceManager(
     fun enterSleepMode() {
         isSleeping = true
         stopListening()
-        speak("Entering sleep mode. Core systems powered down, Sir.")
+        speak("Powering off. Systems in standby, Sir.")
     }
 
     fun wakeUp() {
         isSleeping = false
-        speak("Systems restored. Ready for commands, Sir.")
+        speak("Systems online. At your service, Sir.")
     }
 
     fun stop() {
