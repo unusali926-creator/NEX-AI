@@ -13,7 +13,6 @@ class DeviceManager(private val context: Context) {
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
-    // Master Core UI Power Switch ke liye
     fun toggleBackgroundSentinel(enabled: Boolean = true): Boolean {
         try {
             val intent = Intent(context, NexVoiceService::class.java)
@@ -38,35 +37,27 @@ class DeviceManager(private val context: Context) {
         if (actionTag == null) return null
 
         return when {
-            actionTag.contains("FLASHLIGHT_ON") -> {
+            actionTag == "[ACTION:FLASHLIGHT_ON]" -> {
                 setFlashlight(true)
                 "Flashlight activated, Sir."
             }
-            actionTag.contains("FLASHLIGHT_OFF") -> {
+            actionTag == "[ACTION:FLASHLIGHT_OFF]" -> {
                 setFlashlight(false)
                 "Flashlight deactivated, Sir."
             }
-            actionTag.contains("BATTERY") -> {
+            actionTag == "[ACTION:BATTERY]" -> {
                 val level = getBatteryPercentage()
                 "Sir, battery is currently at $level percent."
             }
-            actionTag.contains("VOLUME_MAX") -> {
-                setMaxVolume()
-                "Audio levels set to maximum, Sir."
-            }
-            actionTag.contains("VOLUME_MUTE") -> {
-                muteVolume()
-                "Audio output muted, Sir."
-            }
-            actionTag.contains("OPEN_WHATSAPP") -> {
+            actionTag == "[ACTION:OPEN_WHATSAPP]" -> {
                 launchApp("com.whatsapp")
                 "Opening WhatsApp, Sir."
             }
-            actionTag.contains("OPEN_YOUTUBE") -> {
+            actionTag == "[ACTION:OPEN_YOUTUBE]" -> {
                 launchApp("com.google.android.youtube")
                 "Opening YouTube, Sir."
             }
-            actionTag.contains("OPEN_CAMERA") -> {
+            actionTag == "[ACTION:OPEN_CAMERA]" -> {
                 openCamera()
                 "Camera active, Sir."
             }
@@ -86,15 +77,6 @@ class DeviceManager(private val context: Context) {
     fun getBatteryPercentage(): Int {
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
         return bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-    }
-
-    private fun setMaxVolume() {
-        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, AudioManager.FLAG_SHOW_UI)
-    }
-
-    private fun muteVolume() {
-        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, AudioManager.FLAG_SHOW_UI)
     }
 
     private fun launchApp(packageName: String) {
