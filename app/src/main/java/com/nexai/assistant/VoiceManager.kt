@@ -9,6 +9,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
 
 class VoiceManager(
@@ -23,6 +24,7 @@ class VoiceManager(
     private var isTtsReady = false
     private val pendingSpeechQueue = mutableListOf<String>()
     private val mainHandler = Handler(Looper.getMainLooper())
+    var isSleeping = false
 
     init {
         initTTS()
@@ -37,8 +39,33 @@ class VoiceManager(
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             isTtsReady = true
-            tts?.language = Locale.ENGLISH
-            setVoicePreset("JARVIS Deep")
+            
+            // Professional British JARVIS Voice setup
+            val ukLocale = Locale.UK
+            if (tts?.isLanguageAvailable(ukLocale) >= TextToSpeech.LANG_AVAILABLE) {
+                tts?.language = ukLocale
+            } else {
+                tts?.language = Locale.ENGLISH
+            }
+
+            // JARVIS Signature Cadence (Dheemi, serious aur crisp tone)
+            tts?.setPitch(0.85f)
+            tts?.setSpeechRate(1.02f)
+
+            // Echo & Mic Clash Protection
+            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {
+                    // Jab Nex bol raha ho, mic ko band rakho taaki Mic Recording Error na aaye
+                    this@VoiceManager.stopListening()
+                }
+
+                override fun onDone(utteranceId: String?) {
+                    // Bolna khatam hone ke baad hi safe rahega
+                }
+
+                override fun onError(utteranceId: String?) {}
+            })
+
             synchronized(pendingSpeechQueue) {
                 for (text in pendingSpeechQueue) {
                     speak(text)
@@ -56,61 +83,31 @@ class VoiceManager(
                 }
                 return@post
             }
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "NEX_TTS_ID")
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "JARVIS_VOICE_OUT")
         }
     }
 
-    fun setVoicePreset(preset: String) {
-        when (preset) {
-            "JARVIS Deep" -> {
-                tts?.setPitch(0.75f)
-                tts?.setSpeechRate(0.95f)
-            }
-            "FRIDAY Female" -> {
-                tts?.setPitch(1.3f)
-                tts?.setSpeechRate(1.05f)
-            }
-            "Classic" -> {
-                tts?.setPitch(1.0f)
-                tts?.setSpeechRate(1.0f)
-            }
-            "Fast Crisp" -> {
-                tts?.setPitch(1.0f)
-                tts?.setSpeechRate(1.2f)
-            }
-            "Calm Soft" -> {
-                tts?.setPitch(0.9f)
-                tts?.setSpeechRate(0.85f)
-            }
-            "Cyber Metallic" -> {
-                tts?.setPitch(0.6f)
-                tts?.setSpeechRate(1.1f)
-            }
-            else -> {
-                tts?.setPitch(0.8f)
-                tts?.setSpeechRate(1.0f)
-            }
-        }
-    }
-
-    // MainActivity ke 0-parameter call ke liye
+    // 0-parameter call
     fun startListening() {
+        if (isSleeping) return
         startListeningInternal(
             { result: String -> onSpeechResult?.invoke(result) },
             { err: String -> onError?.invoke(err) }
         )
     }
 
-    // 1-parameter call ke liye
+    // 1-parameter call
     fun startListening(onResult: (String) -> Unit) {
+        if (isSleeping) return
         startListeningInternal(onResult, onError)
     }
 
-    // 2-parameters call ke liye
+    // 2-parameters call
     fun startListening(
         onResult: (String) -> Unit,
         onErrorCallback: ((String) -> Unit)?
     ) {
+        if (isSleeping) return
         startListeningInternal(onResult, onErrorCallback)
     }
 
@@ -123,7 +120,7 @@ class VoiceManager(
                 this@VoiceManager.stopListening()
 
                 if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-                    val err = "Device par Speech Engine available nahi hai"
+                    val err = "Speech recognizer unavailable"
                     onErrorCallback?.invoke(err)
                     onError?.invoke(err)
                     return@post
@@ -134,15 +131,15 @@ class VoiceManager(
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toString())
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hi-IN")
-                    putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("en-IN", "hi-IN", "en-US"))
-                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                    putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                    putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("en-GB", "en-US", "hi-IN"))
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
                     
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 4000L)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
+                    // ULTRA-FAST LATENCY TIMEOUTS:
+                    // 1 second silence hote hi turant AI ko bhejega (No delay!)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1500L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
                 }
 
                 speechRecognizer?.setRecognitionListener(object : RecognitionListener {
@@ -153,16 +150,11 @@ class VoiceManager(
                     override fun onEndOfSpeech() {}
 
                     override fun onError(error: Int) {
-                        val message = when (error) {
-                            SpeechRecognizer.ERROR_NO_MATCH -> "Aawaz detect nahi hui, dobara boliye..."
-                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Timeout. Boliye Sir..."
-                            SpeechRecognizer.ERROR_AUDIO -> "Mic recording error"
-                            SpeechRecognizer.ERROR_NETWORK -> "Network issue"
-                            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Mic permission missing"
-                            else -> "Mic code: $error"
+                        if (error != SpeechRecognizer.ERROR_NO_MATCH && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                            val err = "Mic error code: $error"
+                            onErrorCallback?.invoke(err)
+                            onError?.invoke(err)
                         }
-                        onErrorCallback?.invoke(message)
-                        onError?.invoke(message)
                     }
 
                     override fun onResults(results: Bundle?) {
@@ -171,10 +163,6 @@ class VoiceManager(
                             val spokenText = matches[0]
                             onResult(spokenText)
                             onSpeechResult?.invoke(spokenText)
-                        } else {
-                            val err = "Aawaz detect nahi hui"
-                            onErrorCallback?.invoke(err)
-                            onError?.invoke(err)
                         }
                     }
 
@@ -184,11 +172,21 @@ class VoiceManager(
 
                 speechRecognizer?.startListening(intent)
             } catch (e: Exception) {
-                val crashErr = "Mic error: ${e.message}"
-                onErrorCallback?.invoke(crashErr)
-                onError?.invoke(crashErr)
+                onErrorCallback?.invoke("Crash: ${e.message}")
             }
         }
+    }
+
+    // Sleep Mode / Off function
+    fun enterSleepMode() {
+        isSleeping = true
+        stopListening()
+        speak("Entering sleep mode. Core systems powered down, Sir.")
+    }
+
+    fun wakeUp() {
+        isSleeping = false
+        speak("Systems restored. Ready for commands, Sir.")
     }
 
     fun stop() {
