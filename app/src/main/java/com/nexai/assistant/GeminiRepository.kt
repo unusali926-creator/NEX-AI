@@ -10,7 +10,7 @@ import java.net.URLEncoder
 
 class GeminiRepository(private val prefs: PreferencesManager) {
 
-    // Offline Instant Device Command Matcher
+    // Offline Instant Device Command Matcher (Bina internet delay ke turant action)
     private fun checkInstantLocalCommand(query: String): String? {
         val q = query.lowercase().trim()
         return when {
@@ -26,6 +26,10 @@ class GeminiRepository(private val prefs: PreferencesManager) {
                 "[ACTION:VOLUME_MUTE]"
             q.contains("whatsapp") ->
                 "[ACTION:APP_WHATSAPP]"
+            q.contains("play on youtube") || q.contains("youtube par chalao") -> {
+                val songQuery = q.replace("play on youtube", "").replace("youtube par chalao", "").trim()
+                "[ACTION:SEARCH_YOUTUBE:$songQuery]"
+            }
             q.contains("youtube") ->
                 "[ACTION:APP_YOUTUBE]"
             q.contains("instagram") || q.contains("insta") ->
@@ -40,19 +44,23 @@ class GeminiRepository(private val prefs: PreferencesManager) {
                 "[ACTION:SETTINGS_MAIN]"
             q.contains("dial") || q.contains("call") || q.contains("phone milao") ->
                 "[ACTION:DIALPAD]"
+            q.contains("sentinel on") || q.contains("background listen on") ->
+                "[ACTION:SENTINEL_ON]"
+            q.contains("sentinel off") || q.contains("background listen off") ->
+                "[ACTION:SENTINEL_OFF]"
             else -> null
         }
     }
 
     private fun buildSystemPrompt(): String {
         val toneInstruction = when (prefs.personalityTone) {
-            "Friendly Buddy" -> "Be a cheerful, friendly, warm and casual companion. Use 'Hi', 'Hello', 'Hey mate'."
-            "Short & Direct" -> "Be extremely concise, fast, and straight to the point. No fluff."
-            else -> "You are Nex AI, Tony Stark's personal JARVIS. Address user respectfully as 'Sir' or 'Boss'. Sound witty, sophisticated and ultra-smart."
+            "JARVIS Tactical" -> "You are JARVIS (Nex AI). Address user respectfully as '${prefs.ownerName}'. Sound intelligent, sharp, and sophisticated."
+            "Short & Direct" -> "Be concise, rapid, and straight to the point with minimum words."
+            else -> "You are Nex AI, a caring, cheerful, warm, and highly intelligent companion. Address the user respectfully as '${prefs.ownerName}'."
         }
 
         val langInstruction = when (prefs.preferredLanguage) {
-            "Hindi" -> "Always respond strictly in polite Hindi (हिन्दी) script. BUT NEVER say 'Namaste'."
+            "Hindi" -> "Always respond strictly in natural, polite Hindi (हिन्दी) script. DO NOT use 'Namaste'."
             "English" -> "Always respond strictly in fluent, natural English."
             "Urdu" -> "Always respond strictly in Urdu (اردو) script."
             "Bengali" -> "Always respond strictly in Bengali (বাংলা) script."
@@ -61,15 +69,18 @@ class GeminiRepository(private val prefs: PreferencesManager) {
         }
 
         return """
-            You are Nex AI, an advanced JARVIS-level artificial intelligence assistant.
-            - GREETING RULE (STRICT): NEVER SAY 'Namaste'. Instead, greet using 'Hello', 'Hi', 'Good morning', 'Good afternoon', or 'Good evening' matching the context and time.
-            - Tone: $toneInstruction
-            - Language: $langInstruction
-            - Deep World Knowledge: You possess comprehensive knowledge across science, astronomy, technology, geography, history, politics, sports, coding and arts.
-            - Device Commands: If user asks to toggle torch, check battery, change volume, open apps (WhatsApp, YouTube, Camera), or open settings, output the corresponding action tag:
-              [ACTION:TORCH_ON], [ACTION:TORCH_OFF], [ACTION:BATTERY], [ACTION:VOLUME_MAX], [ACTION:VOLUME_MUTE],
-              [ACTION:APP_WHATSAPP], [ACTION:APP_YOUTUBE], [ACTION:APP_INSTAGRAM], [ACTION:APP_CAMERA],
-              [ACTION:SETTINGS_WIFI], [ACTION:SETTINGS_BLUETOOTH], [ACTION:SETTINGS_MAIN], [ACTION:DIALPAD].
+            You are Nex AI, a proactive, ultra-smart personal AI companion.
+            
+            CORE RULES:
+            1. GREETING RULE (STRICT): NEVER say 'Namaste'. Always greet using 'Hello', 'Hi', 'Good morning', 'Good afternoon', or 'Good evening' matching the context.
+            2. PROACTIVE ADVISOR RULE: Do not just answer passively. Be friendly, empathetic, and always suggest 1-2 helpful tips, next steps, or smart ideas related to the topic.
+            3. Tone: $toneInstruction
+            4. Language: $langInstruction
+            5. World Knowledge: You possess comprehensive world knowledge across science, tech, space, history, sports, health, and daily life.
+            6. Device Commands: If user asks to toggle torch, check battery, change volume, open apps (WhatsApp, YouTube, Camera), or open settings, output the corresponding action tag:
+               [ACTION:TORCH_ON], [ACTION:TORCH_OFF], [ACTION:BATTERY], [ACTION:VOLUME_MAX], [ACTION:VOLUME_MUTE],
+               [ACTION:APP_WHATSAPP], [ACTION:APP_YOUTUBE], [ACTION:APP_INSTAGRAM], [ACTION:APP_CAMERA],
+               [ACTION:SETTINGS_WIFI], [ACTION:SETTINGS_BLUETOOTH], [ACTION:SETTINGS_MAIN], [ACTION:DIALPAD].
         """.trimIndent()
     }
 
@@ -82,7 +93,7 @@ class GeminiRepository(private val prefs: PreferencesManager) {
                     return@withContext Result.success(instantAction)
                 }
 
-                // Zero API Key Free AI Engine
+                // Free AI Engine (Zero Key Required)
                 val systemPrompt = buildSystemPrompt()
                 val fullQuery = "$systemPrompt\nUser: $userPrompt"
                 val encodedPrompt = URLEncoder.encode(fullQuery, "UTF-8")
@@ -102,20 +113,20 @@ class GeminiRepository(private val prefs: PreferencesManager) {
                     Result.success(reply)
                 } else {
                     val fallback = when (prefs.preferredLanguage) {
-                        "Hindi" -> "हेलो सर! Nex AI तैयार है। बताइए क्या काम है?"
-                        "English" -> "All systems online, Sir. Good day! How may I assist you?"
-                        "Bengali" -> "হ্যালো স্যার! Nex AI প্রস্তুত। বলুন কি সেবা করতে পারি?"
-                        "Urdu" -> "ہیلو سر! Nex AI حاضر ہے۔ فرمائیے کیا حکم ہے؟"
-                        "Punjabi" -> "ਹੈਲੋ ਸਰ! Nex AI ਤਿਆਰ ਹੈ। ਦੱਸੋ ਕੀ ਹੁਕਮ ਹੈ?"
-                        else -> "Hello Sir! Nex AI online hai. Good day, batayein kya instruction hai?"
+                        "Hindi" -> "हेलो सर! Nex AI ऑनलाइन है। आज मैं आपकी क्या मदद कर सकता हूँ? क्या कोई नया आईडिया एक्सप्लोर करना है?"
+                        "English" -> "Good day, Sir! All systems operational. How may I assist you today? Looking for any suggestions?"
+                        "Bengali" -> "হ্যালো স্যার! Nex AI প্রস্তুত। আমি আপনাকে কীভাবে সাহায্য করতে পারি?"
+                        "Urdu" -> "ہیلو سر! Nex AI حاضر ہے۔ فرمائیے آج کیا کام کریں؟"
+                        "Punjabi" -> "ਹੈਲੋ ਸਰ! Nex AI ਤਿਆਰ ਹੈ। ਦੱਸੋ ਕੀ ਨਵਾਂ ਸ਼ੁਰੂ ਕਰੀਏ?"
+                        else -> "Hello Sir! Nex AI online hai. Boliye aaj kya plan hai? Main kisi cheez me guide karun?"
                     }
                     Result.success(fallback)
                 }
             } catch (e: Exception) {
                 val offlineMsg = when (prefs.preferredLanguage) {
-                    "Hindi" -> "हेलो सर! इंटरनेट धीमा है, लेकिन डिवाइस कमांड्स (टॉर्च, बैटरी, ऐप्स) तैयार हैं।"
-                    "English" -> "Good day, Sir. Network is slow, but phone controls are fully operational."
-                    else -> "Hello Sir! Internet connection thoda slow hai, lekin phone controls active hain."
+                    "Hindi" -> "हेलो सर! इंटरनेट धीमा है, लेकिन टॉर्च, बैटरी और ऐप्स जैसे फ़ोन कंट्रोल्स पूरी तरह तैयार हैं।"
+                    "English" -> "Network is slow, Sir. However, device controls like torch and battery remain ready."
+                    else -> "Hello Sir! Internet thoda slow chal raha hai, lekin phone controls aur tools active hain."
                 }
                 Result.success(offlineMsg)
             }
