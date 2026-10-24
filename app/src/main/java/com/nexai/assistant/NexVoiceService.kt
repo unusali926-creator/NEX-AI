@@ -1,5 +1,6 @@
 package com.nexai.assistant
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,6 +8,8 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -17,6 +20,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import java.util.Locale
 
 class NexVoiceService : Service() {
@@ -28,19 +32,41 @@ class NexVoiceService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
-        val notification = buildForegroundNotification()
-        startForeground(NOTIFICATION_ID, notification)
 
-        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
-        @Suppress("DEPRECATION")
-        wakeLock = powerManager?.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
-            "NexAI::AllTimeWakeLock"
-        )
+        // Safety Check: Agar permission nahi hai to crash mat ho, chupchap stop ho jao
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            stopSelf()
+            return
+        }
+
+        try {
+            createNotificationChannel()
+            val notification = buildForegroundNotification()
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+
+            val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+            @Suppress("DEPRECATION")
+            wakeLock = powerManager?.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "NexAI::SafeWakeLock"
+            )
+        } catch (e: Exception) {
+            // Prevent fatal crash on Android 14
+            stopSelf()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         if (!isStandbyLoopActive) {
             isStandbyLoopActive = true
             startWakeWordLoop()
@@ -64,7 +90,7 @@ class NexVoiceService : Service() {
 
                         override fun onError(error: Int) {
                             if (isStandbyLoopActive) {
-                                handler.postDelayed({ startWakeWordLoop() }, 800)
+                                handler.postDelayed({ startWakeWordLoop() }, 1000)
                             }
                         }
 
@@ -77,7 +103,7 @@ class NexVoiceService : Service() {
                                 }
                             }
                             if (isStandbyLoopActive) {
-                                handler.postDelayed({ startWakeWordLoop() }, 400)
+                                handler.postDelayed({ startWakeWordLoop() }, 500)
                             }
                         }
 
@@ -94,7 +120,7 @@ class NexVoiceService : Service() {
                 speechRecognizer?.startListening(intent)
             } catch (e: Exception) {
                 if (isStandbyLoopActive) {
-                    handler.postDelayed({ startWakeWordLoop() }, 1000)
+                    handler.postDelayed({ startWakeWordLoop() }, 1200)
                 }
             }
         }
@@ -110,7 +136,7 @@ class NexVoiceService : Service() {
             }
             startActivity(openIntent)
         } catch (e: Exception) {
-            // Ignore launch exceptions
+            // Ignore
         }
     }
 
@@ -118,10 +144,10 @@ class NexVoiceService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Nex AI All-Time Sentinel",
+                "Nex AI Standby Sentinel",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Nex AI is active alongside device. Say 'Nex' to trigger."
+                description = "Nex AI background listener"
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
@@ -138,8 +164,8 @@ class NexVoiceService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Nex AI • Active Companion")
-            .setContentText("All systems online. Say 'Nex' anytime.")
+            .setContentTitle("Nex AI • Active")
+            .setContentText("Listening for 'Nex' command.")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -150,11 +176,15 @@ class NexVoiceService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         isStandbyLoopActive = false
-        speechRecognizer?.stopListening()
-        speechRecognizer?.destroy()
-        speechRecognizer = null
-        if (wakeLock?.isHeld == true) {
-            wakeLock?.release()
+        try {
+            speechRecognizer?.stopListening()
+            speechRecognizer?.destroy()
+            speechRecognizer = null
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+            }
+        } catch (e: Exception) {
+            // Ignore
         }
     }
 
@@ -162,6 +192,6 @@ class NexVoiceService : Service() {
 
     companion object {
         private const val NOTIFICATION_ID = 8801
-        private const val CHANNEL_ID = "nex_all_time_channel"
+        private const val CHANNEL_ID = "nex_safe_sentinel_channel"
     }
 }
